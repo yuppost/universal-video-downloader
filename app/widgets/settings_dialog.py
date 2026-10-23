@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
                                QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea,
                                QSpinBox, QVBoxLayout, QWidget)
 
+from app import APP_NAME, UPDATE_INFO_URL, __version__
 from app.config import BROWSERS, QUALITIES, Settings
 from app.models.crop import ASPECT_PRESETS
 from app.services import ytdlp_service as yd
@@ -19,12 +20,13 @@ from app.utils.paths import dir_size, human_size
 
 
 class _UpdateBridge(QObject):
-    done = Signal(bool, str)
+    result = Signal(str, object)         # status, UpdateInfo | None
 
 
 class SettingsDialog(QDialog):
     clearCacheRequested = Signal()
     cookiesRequested = Signal()
+    updateRequested = Signal(object)         # an UpdateInfo: the user wants to see / install it
 
     def __init__(self, settings: Settings, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -33,7 +35,8 @@ class SettingsDialog(QDialog):
         self.resize(680, 720)
         self.s = settings
         self._bridge = _UpdateBridge()
-        self._bridge.done.connect(self._update_done)
+        self._bridge.result.connect(self._update_checked)
+        self._found = None
 
         self.download_dir = self._path_row(settings.download_dir, folder=True)
         self.temp_dir = self._path_row(settings.temp_dir, folder=True)
@@ -84,9 +87,6 @@ class SettingsDialog(QDialog):
                                 "from this browser while downloading. Saved sign-ins always win.")
         self.check_start = QCheckBox("Check the yt-dlp version when the app starts")
         self.check_app = QCheckBox("Tell me when a new version of this app is available")
-        self.icon_row = self._path_row(settings.icon_path, folder=False, title="Choose an icon image",
-                                       filt="Images (*.png *.ico *.jpg *.jpeg *.bmp *.svg)")
-        self.icon_row[0].setPlaceholderText("Leave empty for the built-in icon")
         self.btn_setup = QPushButton("Setup: install / check FFmpeg and yt-dlp...")
         self.btn_setup.clicked.connect(self._open_setup)
 
@@ -101,7 +101,6 @@ class SettingsDialog(QDialog):
         form.addRow("Filename template", self.template)
         form.addRow("Max simultaneous tasks", self.concurrent)
         form.addRow("Theme", self.theme)
-        form.addRow("App icon", self.icon_row[1])
         form.addRow("", self.btn_setup)
         form.addRow("FFmpeg executable", self.ffmpeg[1])
         self.ff_status = QLabel("")
@@ -124,15 +123,25 @@ class SettingsDialog(QDialog):
         btn_cookies.clicked.connect(self.cookiesRequested)
         form.addRow("Sign-in", btn_cookies)
         form.addRow("Fallback browser", self.browser)
-        self.yt_label = QLabel(f"yt-dlp version: {yd.ytdlp_version()}")
-        self.btn_update = QPushButton("Update yt-dlp")
-        self.btn_update.clicked.connect(self._update)
-        yrow = QHBoxLayout()
-        yrow.addWidget(self.yt_label, 1)
-        yrow.addWidget(self.btn_update)
-        form.addRow("yt-dlp", yrow)
         form.addRow("", self.check_start)
         form.addRow("", self.check_app)
+        self.about = QLabel(f"<b>{APP_NAME}</b> version <b>{__version__}</b> &nbsp;·&nbsp; yt-dlp {yd.ytdlp_version()}")
+        self.about.setTextFormat(Qt.RichText)
+        form.addRow("About", self.about)
+        self.btn_check = QPushButton("Check for updates")
+        self.btn_check.clicked.connect(self._check_updates)
+        self.btn_view = QPushButton("Update now...")
+        self.btn_view.setObjectName("primary")
+        self.btn_view.hide()
+        self.btn_view.clicked.connect(lambda: self._found and self.updateRequested.emit(self._found))
+        self.check_result = QLabel("")
+        self.check_result.setObjectName("muted")
+        self.check_result.setWordWrap(True)
+        urow = QHBoxLayout()
+        urow.addWidget(self.btn_check)
+        urow.addWidget(self.btn_view)
+        urow.addWidget(self.check_result, 1)
+        form.addRow("Updates", urow)
 
         box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         box.accepted.connect(self.accept)
@@ -159,7 +168,7 @@ class SettingsDialog(QDialog):
         from app.widgets.dependency_dialog import DependencyDialog
         DependencyDialog(self.ffmpeg[0].text().strip(), self, self.hw.currentData()).exec()
         self._ff_check()
-        self.yt_label.setText(f"yt-dlp version: {yd.ytdlp_version()}")
+        self.about.setText(f"<b>{APP_NAME}</b> version <b>{__version__}</b> &nbsp;·&nbsp; yt-dlp {yd.ytdlp_version()}")
 
     def _path_row(self, value: str, folder: bool, title: str = "Locate ffmpeg executable", filt: str = ""):
         edit = QLineEdit(value)
@@ -211,15 +220,30 @@ class SettingsDialog(QDialog):
             self.clearCacheRequested.emit()
             self.cache_label.setText(f"Cache in use: {human_size(dir_size(self.s.cache_dir))}")
 
-    def _update(self) -> None:
-        self.btn_update.setEnabled(False)
-        self.btn_update.setText("Updating...")
-        threading.Thread(target=lambda: self._bridge.done.emit(*yd.update_ytdlp()), daemon=True).start()
+    def _check_updates(self) -> None:
+        self.btn_check.setEnabled(False)
+        self.btn_check.setText("Checking...")
+        self.btn_view.hide()
+        self.check_result.setText("")
 
-    def _update_done(self, ok: bool, msg: str) -> None:
-        self.btn_update.setEnabled(True)
-        self.btn_update.setText("Update yt-dlp")
-        (QMessageBox.information if ok else QMessageBox.warning)(self, "yt-dlp update", msg)
+        def work() -> None:
+            from app.services.update_service import check_update
+            self._bridge.result.emit(*check_update(UPDATE_INFO_URL, __version__))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _update_checked(self, status: str, info) -> None:
+        self.btn_check.setEnabled(True)
+        self.btn_check.setText("Check for updates")
+        self._found = info if status == "available" else None
+        if status == "available":
+            self.check_result.setText(f"Version {info.version} is available (you have {__version__}).")
+            self.btn_view.show()
+        elif status == "latest":
+            self.check_result.setText(f"You have the latest version ({__version__}).")
+        elif status == "unconfigured":
+            self.check_result.setText("No update source is configured in this build.")
+        else:
+            self.check_result.setText("Could not check for updates. Check your internet connection and try again.")
 
     def result_settings(self) -> Settings:
         s = self.s
@@ -242,6 +266,5 @@ class SettingsDialog(QDialog):
         s.cookies_browser = self.browser.currentData()
         s.ytdlp_check_on_start = self.check_start.isChecked()
         s.check_app_updates = self.check_app.isChecked()
-        s.icon_path = self.icon_row[0].text().strip()
         s.sanitize()
         return s

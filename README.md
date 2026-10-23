@@ -104,7 +104,7 @@ Output sections fold so the clip list stays visible; very narrow tabs use icon-o
 pinned at the bottom of the options column. If the window is smaller than the content, the page scrolls. Minimum window size: 640x480.
 
 ## App icon
-*Settings > App icon*: pick any PNG/ICO/JPG/SVG (or press Reset for the built-in icon). It is used for the window and the taskbar immediately.
+The app uses the built-in icon (replace `assets/icon.ico` / `assets/icon.png` before building to change it). Settings > About shows the version and has **Check for updates**.
 The icon of the **.exe file itself** comes from `assets\icon.ico` at build time: replace that file with your own `.ico`, then run `build.bat`.
 
 ## Using the app

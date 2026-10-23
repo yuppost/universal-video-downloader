@@ -90,16 +90,26 @@ def parse_info(raw: bytes) -> Optional[UpdateInfo]:
     return UpdateInfo(ver, url, str(data.get("notes", ""))[:2000], asset_url, sha.lower(), size)
 
 
-def fetch_update(source: str, current: str, timeout: int = 8) -> Optional[UpdateInfo]:
-    """The newer release described at *source*, or None (no update, offline, bad file)."""
+def check_update(source: str, current: str, timeout: int = 8) -> Tuple[str, Optional[UpdateInfo]]:
+    """("latest" | "available" | "error" | "unconfigured", info). Never raises."""
     url = resolve_source(source)
+    if not url:
+        return "unconfigured", None
     if not url.lower().startswith("https://"):
-        return None
+        return "error", None
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "UniversalVideoStudio"})
         with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310 - https only, checked above
-            raw = r.read(100_000)
+            raw = r.read(300_000)
     except Exception:  # noqa: BLE001 - an update check must never disturb the app
-        return None
+        return "error", None
     info = parse_info(raw)
-    return info if info and is_newer(info.version, current) else None
+    if info is None:
+        return "error", None
+    return ("available", info) if is_newer(info.version, current) else ("latest", info)
+
+
+def fetch_update(source: str, current: str, timeout: int = 8) -> Optional[UpdateInfo]:
+    """The newer release described at *source*, or None (no update, offline, bad file)."""
+    status, info = check_update(source, current, timeout)
+    return info if status == "available" else None

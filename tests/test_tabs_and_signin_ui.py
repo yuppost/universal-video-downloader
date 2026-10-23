@@ -393,3 +393,24 @@ def test_update_dialog_runs_and_reports_failure(qapp, tmp_path, monkeypatch):
         qapp.processEvents()
         time.sleep(0.05)
     assert dlg.btn.text() == "Close" and "Nothing was changed" in dlg.status.text() and dlg.new_dir is None
+
+
+def test_settings_shows_version_update_check_and_no_icon_or_ytdlp_row(qapp, tmp_path, monkeypatch):
+    monkeypatch.setenv("UVS_DATA_DIR", str(tmp_path))
+    from app import __version__
+    from app.config import Settings
+    from app.services.update_service import UpdateInfo
+    from app.widgets.settings_dialog import SettingsDialog
+    dlg = SettingsDialog(Settings())
+    assert __version__ in dlg.about.text()
+    assert not hasattr(dlg, "icon_row") and not hasattr(dlg, "btn_update") and not hasattr(dlg, "yt_label")
+    got = []
+    dlg.updateRequested.connect(got.append)
+    dlg._update_checked("latest", UpdateInfo(__version__, "https://x/y"))
+    assert "latest version" in dlg.check_result.text() and dlg.btn_view.isHidden()
+    dlg._update_checked("available", UpdateInfo("9.9.9", "https://x/y"))
+    assert not dlg.btn_view.isHidden() and "9.9.9" in dlg.check_result.text()
+    dlg.btn_view.click()
+    assert got and got[0].version == "9.9.9"
+    dlg._update_checked("error", None)
+    assert "Could not check" in dlg.check_result.text()

@@ -491,6 +491,7 @@ class MainWindow(QMainWindow):
         dlg = SettingsDialog(self.settings, self)
         dlg.clearCacheRequested.connect(self._clear_cache)
         dlg.cookiesRequested.connect(self.open_cookie_manager)
+        dlg.updateRequested.connect(self._on_settings_update_requested)
         if dlg.exec() == QDialog.Accepted:
             self.settings = dlg.result_settings()
             save_settings(self.settings)
@@ -504,6 +505,10 @@ class MainWindow(QMainWindow):
             QApplication.instance().setWindowIcon(ic)
             self.setWindowIcon(ic)
             self.statusBar().showMessage("Settings saved", 4000)
+
+    def _on_settings_update_requested(self, info) -> None:
+        self._on_app_update(info)              # also shows the status-bar button
+        self._show_app_update()
 
     def _refresh_icons(self) -> None:
         self.btn_settings.setIcon(theme.icon("settings", size=16))

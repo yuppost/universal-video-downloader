@@ -112,3 +112,15 @@ def test_helper_script_protects_user_data_and_restarts():
     assert 'start "" "%EXE%"' in s and "tasklist" in s and "if errorlevel 8" in s
     assert "timeout" not in s                       # no console input in a detached helper: use ping for sleeping
     assert not su.can_self_update()                 # development / non-Windows: never replaces itself
+
+
+def test_check_update_statuses(monkeypatch):
+    assert u.check_update("", "1.0.0")[0] == "unconfigured"
+    assert u.check_update("http://x/y.json", "1.0.0")[0] == "error"
+    import io
+    body = json.dumps({"version": "1.0.0", "url": "https://x/y"}).encode()
+    monkeypatch.setattr(u.urllib.request, "urlopen", lambda *a, **k: io.BytesIO(body))
+    assert u.check_update("https://x/latest.json", "1.0.0")[0] == "latest"
+    assert u.check_update("https://x/latest.json", "0.9.0")[0] == "available"
+    monkeypatch.setattr(u.urllib.request, "urlopen", lambda *a, **k: io.BytesIO(b"<html>"))
+    assert u.check_update("https://x/latest.json", "1.0.0")[0] == "error"
