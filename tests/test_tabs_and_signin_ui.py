@@ -382,3 +382,14 @@ def test_update_button_appears_when_new_version_found(qapp, tmp_path, monkeypatc
     win._on_app_update(UpdateInfo("9.9.9", "https://example.com/app.zip", "notes"))
     assert not win.btn_new_version.isHidden() and "9.9.9" in win.btn_new_version.text()
     win.close()
+
+
+def test_update_dialog_runs_and_reports_failure(qapp, tmp_path, monkeypatch):
+    from app.services.update_service import UpdateInfo
+    from app.widgets.update_dialog import UpdateDialog
+    dlg = UpdateDialog(UpdateInfo("9.9.9", "https://x/y", "", "https://127.0.0.1:9/none.zip", "", 0))
+    t0 = time.time()
+    while time.time() - t0 < 15 and dlg.btn.text() != "Close":
+        qapp.processEvents()
+        time.sleep(0.05)
+    assert dlg.btn.text() == "Close" and "Nothing was changed" in dlg.status.text() and dlg.new_dir is None

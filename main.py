@@ -93,11 +93,24 @@ def main() -> int:
     settings = load_settings()
     theme.apply_theme(app, settings.theme)
     app.setWindowIcon(appicon.load_icon(settings.icon_path))
+    from app.widgets.first_run_setup import FirstRunSetup, needs_setup
+    if needs_setup(settings):                      # FFmpeg / Deno are downloaded here once, then reused
+        if pyi_splash is not None:
+            pyi_splash.close()
+        splash.close()
+        dlg = FirstRunSetup(settings)
+        dlg.exec()
+        if dlg.skipped:
+            from app.config import save_settings
+            save_settings(settings)
     win = MainWindow(settings)
     win.show()
     splash.finish(win)
     if pyi_splash is not None:
-        pyi_splash.close()
+        try:
+            pyi_splash.close()
+        except Exception:  # noqa: BLE001 - already closed
+            pass
     log.info("Application started")
     return app.exec()
 

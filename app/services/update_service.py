@@ -21,8 +21,11 @@ from urllib.parse import urlsplit
 @dataclass
 class UpdateInfo:
     version: str
-    url: str
+    url: str                      # page to open in the browser (release page)
     notes: str = ""
+    asset_url: str = ""           # direct https link of the zip, enables the one-click update
+    sha256: str = ""
+    size: int = 0
 
 
 def version_tuple(v: str) -> Tuple[int, ...]:
@@ -52,7 +55,15 @@ def resolve_source(source: str) -> str:
     return s
 
 
+def _pick_asset(assets) -> dict:
+    zips = [a for a in (assets or []) if isinstance(a, dict) and str(a.get("name", "")).lower().endswith(".zip")]
+    zips.sort(key=lambda a: ("windows" not in str(a.get("name", "")).lower(), str(a.get("name", ""))))
+    return zips[0] if zips else {}
+
+
 def parse_info(raw: bytes) -> Optional[UpdateInfo]:
+    asset_url = sha = ""
+    size = 0
     try:
         data = json.loads(raw.decode("utf-8-sig"))
         if "tag_name" in data:                        # GitHub "latest release" API answer
@@ -60,14 +71,23 @@ def parse_info(raw: bytes) -> Optional[UpdateInfo]:
                 return None
             ver = str(data["tag_name"]).strip().lstrip("vV")
             url = str(data["html_url"]).strip()
+            a = _pick_asset(data.get("assets"))
+            asset_url = str(a.get("browser_download_url", ""))
+            sha = str(a.get("digest", "")).split(":", 1)[-1] if str(a.get("digest", "")).startswith("sha256:") else ""
+            size = int(a.get("size") or 0)
             data = {"notes": data.get("body") or data.get("name") or ""}
         else:
             ver, url = str(data["version"]).strip(), str(data["url"]).strip()
+            asset_url, sha, size = str(data.get("zip", "")), str(data.get("sha256", "")), int(data.get("size") or 0)
     except (ValueError, KeyError, TypeError, UnicodeDecodeError, AttributeError):
         return None
     if not re.fullmatch(r"\d+(\.\d+){0,3}", ver) or urlsplit(url).scheme.lower() != "https":
         return None
-    return UpdateInfo(ver, url, str(data.get("notes", ""))[:2000])
+    if asset_url and urlsplit(asset_url).scheme.lower() != "https":
+        asset_url = ""
+    if sha and not re.fullmatch(r"[0-9a-fA-F]{64}", sha):
+        sha = ""
+    return UpdateInfo(ver, url, str(data.get("notes", ""))[:2000], asset_url, sha.lower(), size)
 
 
 def fetch_update(source: str, current: str, timeout: int = 8) -> Optional[UpdateInfo]:

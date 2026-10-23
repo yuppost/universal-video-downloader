@@ -142,7 +142,9 @@ No passwords or cookies are stored. "Browser sign-in" only tells yt-dlp which in
 
 ## Portable build (PyInstaller)
 Run **`build.bat`** (runs the tests first). Result: `dist\UniversalVideoStudio\UniversalVideoStudio.exe`.
-The build downloads FFmpeg and Deno once (into `.\ffmpeg`, `.\deno`) and bundles them with yt-dlp, so users need no setup.
+The build bundles only yt-dlp. FFmpeg and Deno are **not** bundled: on first launch a setup screen downloads them from their official
+sources (SHA-256 verified) into `%APPDATA%\UniversalVideoStudio\tools`, shows progress, offers Retry on errors and opens the app
+automatically when ready. Later launches reuse them.
 The build contains no cookies or personal data: those are created on each user's PC in `%APPDATA%`. (Advanced: an empty `portable.flag` file next to the exe stores data in `data\` instead.)
 In a packaged build yt-dlp is frozen into the exe: to update it, update it in the venv and rebuild.
 
@@ -244,3 +246,16 @@ non-interactively when `CI` is set).
 2. `git tag v1.1.0` then `git push origin v1.1.0` - the "Build Windows app" workflow builds the zip and creates the Release.
 3. Users of older versions see "Update 1.1.0 available" in the status bar; the button opens the Release page to download.
 The tag number must be higher than the version inside the user's app.
+
+### One-click update
+In the packaged app, "Update x.y.z available" offers **Update now**: the app downloads the Release zip, checks its SHA-256 (GitHub
+publishes it with the asset), unpacks it, closes itself and a small helper (`%TEMP%\UVS-update\apply_update.cmd`) copies the new
+files over the app folder and starts the app again. `data\` and `portable.flag` are never replaced; settings, sign-ins and history
+are stored in `%APPDATA%` and stay. The log of the last update is `%TEMP%\UVS-update\update.log`. If the folder is not writable
+(for example under `C:\Program Files`) the app only opens the download page.
+
+## Installer
+The workflow also builds `UniversalVideoStudio-Setup-<version>.exe` with Inno Setup (`installer/UniversalVideoStudio.iss`): a per-user
+install into `%LOCALAPPDATA%\Programs\UniversalVideoStudio` (no administrator rights, so the one-click updater keeps working),
+Start-menu entry, optional desktop shortcut, uninstaller. Uninstalling keeps your settings and sign-ins in `%APPDATA%`.
+Locally: `build.bat`, then `iscc /DAppVersion=1.0.0 installer\UniversalVideoStudio.iss`.

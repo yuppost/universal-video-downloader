@@ -5,3 +5,4 @@ __pycache__/
 *.pyc
 ffmpeg/
 deno/
+installer_out/

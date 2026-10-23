@@ -1,5 +1,5 @@
 @echo off
-REM Builds a folder (exe + FFmpeg + Deno + yt-dlp): dist\UniversalVideoStudio\UniversalVideoStudio.exe
+REM Builds the app folder dist\UniversalVideoStudio (exe + yt-dlp). FFmpeg and Deno are downloaded by the app on first launch.
 setlocal
 cd /d "%~dp0"
 
@@ -38,18 +38,15 @@ if exist "assets\splash.png" %VPY% -c "import tkinter" >nul 2>nul && set "SPLASH
   --hidden-import PySide6.QtWebEngineWidgets --hidden-import PySide6.QtWebEngineCore ^
   main.py || (echo PyInstaller failed & %PAUSE% & exit /b 1)
 
-REM Bundle FFmpeg + Deno (downloaded once into .\ffmpeg and .\deno, then reused by later builds)
-%VPY% tools\fetch_bundle.py || (echo Could not download FFmpeg/Deno. Check the internet and run again. & %PAUSE% & exit /b 1)
-xcopy /E /I /Y "ffmpeg" "dist\UniversalVideoStudio\ffmpeg" >nul
-xcopy /E /I /Y "deno" "dist\UniversalVideoStudio\deno" >nul
-echo FFmpeg, Deno and yt-dlp bundled.
+REM FFmpeg and Deno are NOT bundled: the app downloads them (SHA-256 verified) on first launch into %%APPDATA%%.
+echo yt-dlp is bundled; FFmpeg and Deno are downloaded by the app on first launch.
 
 REM SECURITY: the build must never contain sign-in cookies or personal data.
 REM Settings, cookies and history live in %%APPDATA%%\UniversalVideoStudio on the user's PC, not here.
 if exist "dist\UniversalVideoStudio\data" rmdir /S /Q "dist\UniversalVideoStudio\data"
 if exist "dist\UniversalVideoStudio\cookies" rmdir /S /Q "dist\UniversalVideoStudio\cookies"
 echo.
-echo Build ready: dist\UniversalVideoStudio\UniversalVideoStudio.exe  (contains no cookies)
+echo Build ready: dist\UniversalVideoStudio\UniversalVideoStudio.exe  (no cookies, no FFmpeg/Deno)
 echo Videos go to: %%USERPROFILE%%\Videos\UniversalVideoStudio\Video  and  \Cache video
 endlocal
 %PAUSE%

@@ -90,8 +90,10 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(1200, lambda: threading.Thread(target=yd.prewarm, daemon=True).start())
         if settings.check_app_updates and UPDATE_INFO_URL:
             QTimer.singleShot(4000, lambda: threading.Thread(target=self._check_app_update, daemon=True).start())
-        if not st.all_ok or (not st.youtube_ok and not settings.setup_prompt_dismissed):
-            QTimer.singleShot(400, self.open_setup)       # offer one-click install of what is missing
+        if not st.ytdlp_ok:
+            QTimer.singleShot(400, self.open_setup)       # development only: yt-dlp is bundled in the packaged app
+        elif not st.ffmpeg_ok:                            # FFmpeg/Deno are fetched by the first-run screen (main.py)
+            self.statusBar().showMessage("FFmpeg is not installed yet - open Settings > Setup to download it.")
 
     def _check_app_update(self) -> None:
         from app.services.update_service import fetch_update
@@ -112,16 +114,44 @@ class MainWindow(QMainWindow):
         from urllib.parse import urlsplit
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QDesktopServices
+        from app.services import self_update
+        one_click = bool(info.asset_url) and self_update.can_self_update()
         box = QMessageBox(QMessageBox.Information, "New version available",
                           f"Version {info.version} is available (you have {__version__}).\n\n"
                           + (info.notes + "\n\n" if info.notes else "")
-                          + f"Download page: {urlsplit(info.url).hostname}\n"
-                          "Close the app, then replace your old folder with the new one.", QMessageBox.NoButton, self)
-        b = box.addButton("Open download page", QMessageBox.AcceptRole)
+                          + ("Update now downloads it, replaces the app files and restarts the app.\n"
+                             "Your settings, sign-ins and history are kept." if one_click else
+                             f"Download page: {urlsplit(info.url).hostname}\n"
+                             "Close the app, then replace your old folder with the new one."), QMessageBox.NoButton, self)
+        b_now = box.addButton("Update now", QMessageBox.AcceptRole) if one_click else None
+        b_page = box.addButton("Open download page", QMessageBox.ActionRole)
         box.addButton("Later", QMessageBox.RejectRole)
         box.exec()
-        if box.clickedButton() is b:
+        clicked = box.clickedButton()
+        if clicked is b_page:
             QDesktopServices.openUrl(QUrl(info.url))
+        elif b_now is not None and clicked is b_now:
+            self._start_self_update(info)
+
+    def _start_self_update(self, info) -> None:
+        from app.services import self_update
+        from app.widgets.update_dialog import UpdateDialog
+        busy = [j for j in self.controller.queue.jobs if not j.is_finished]
+        if busy and QMessageBox.question(
+                self, "Update", f"{len(busy)} job(s) are still running or queued and will be cancelled by the update. "
+                "Continue?") != QMessageBox.Yes:
+            return
+        dlg = UpdateDialog(info, self)
+        if dlg.exec() != QDialog.Accepted or dlg.new_dir is None:
+            return
+        try:
+            self._quitting_for_update = True
+            self_update.launch_helper(dlg.new_dir)
+        except OSError as exc:
+            self._quitting_for_update = False
+            QMessageBox.warning(self, "Update", f"The update could not be started: {exc}")
+            return
+        self.close()                                   # saves settings; the helper restarts the app with the new files
 
     def _restore_geometry(self, saved: str) -> None:
         """Restore the saved window size; a missing or unreadable value (older versions) is simply ignored."""
@@ -518,7 +548,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, e) -> None:  # noqa: N802
         busy = [j for j in self.controller.queue.jobs if not j.is_finished]
-        if busy and QMessageBox.question(
+        if busy and not getattr(self, "_quitting_for_update", False) and QMessageBox.question(
                 self, "Quit", f"{len(busy)} job(s) are still running or queued. Cancel them and quit?") != QMessageBox.Yes:
             e.ignore()
             return

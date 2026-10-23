@@ -1,13 +1,14 @@
 name: Build Windows app
 
 # Run it by hand (Actions tab > "Build Windows app" > Run workflow) or push a tag such as v1.1.0 to also publish a Release.
+# FFmpeg and Deno are NOT downloaded or bundled here: the app downloads them (SHA-256 verified) on first launch.
 on:
   workflow_dispatch:
   push:
     tags: ["v*"]
 
 permissions:
-  contents: write            # needed only to attach the zip to a Release
+  contents: write            # needed only to attach the files to a Release
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"     # actions run on Node 24 (Node 20 is being removed from the runners)
@@ -15,7 +16,7 @@ env:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
 
@@ -25,23 +26,42 @@ jobs:
           cache: pip
           cache-dependency-path: requirements*.txt
 
-      - name: Build (tests + PyInstaller + FFmpeg/Deno bundle)
+      - name: Build (tests + PyInstaller)
+        timeout-minutes: 20
         shell: cmd
         env:
           QT_QPA_PLATFORM: offscreen
           UVS_NO_AUDIO: "1"
         run: build.bat
 
-      - name: Zip
+      - name: Read version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path app/__init__.py -Pattern '__version__ = "([^"]+)"').Matches[0].Groups[1].Value
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Zip (portable + used by the in-app updater)
         shell: pwsh
         run: |
           if (-not (Test-Path dist/UniversalVideoStudio/UniversalVideoStudio.exe)) { throw "exe missing" }
+          if (Test-Path dist/UniversalVideoStudio/ffmpeg) { throw "FFmpeg must not be bundled" }
           Compress-Archive -Path dist/UniversalVideoStudio -DestinationPath UniversalVideoStudio-windows.zip
+
+      - name: Installer (Inno Setup)
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=${{ steps.ver.outputs.version }}" installer/UniversalVideoStudio.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
 
       - uses: actions/upload-artifact@v5
         with:
           name: UniversalVideoStudio-windows
-          path: UniversalVideoStudio-windows.zip
+          path: |
+            UniversalVideoStudio-windows.zip
+            installer_out/*.exe
           if-no-files-found: error
 
       - name: Publish Release (tags only)
@@ -49,4 +69,4 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" UniversalVideoStudio-windows.zip --title "${{ github.ref_name }}" --generate-notes
+        run: gh release create "${{ github.ref_name }}" UniversalVideoStudio-windows.zip installer_out/*.exe --title "${{ github.ref_name }}" --generate-notes
