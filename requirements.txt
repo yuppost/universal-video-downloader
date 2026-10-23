@@ -1,0 +1,7 @@
+# Runtime dependencies (constrained, not hard-pinned, so security/extractor fixes arrive).
+# To update: activate the venv, then
+#   pip install --upgrade -r requirements.txt
+# yt-dlp breaks often when sites change; update it first:
+#   pip install --upgrade yt-dlp
+PySide6>=6.8,<7
+yt-dlp[default,curl-cffi]>=2025.1.1
