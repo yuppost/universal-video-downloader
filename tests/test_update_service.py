@@ -110,6 +110,7 @@ def test_helper_script_protects_user_data_and_restarts():
     s = su.build_script()
     assert "\r\n" in s and "robocopy" in s and '/XD "%APP%\\data"' in s and "portable.flag" in s
     assert 'start "" "%EXE%"' in s and "tasklist" in s and "if errorlevel 8" in s
+    assert "| find" not in s and "tasklist" in s     # no pipes: they spawn extra console windows
     assert "timeout" not in s                       # no console input in a detached helper: use ping for sleeping
     assert not su.can_self_update()                 # development / non-Windows: never replaces itself
 

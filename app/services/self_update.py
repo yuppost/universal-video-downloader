@@ -109,10 +109,12 @@ def build_script() -> str:
         'set "NEW=%~3"',
         'set "EXE=%~4"',
         'set "LOG=%~5"',
+        'set "CHK=%~dp5pid_check.txt"',
         'echo [update] waiting for the app to exit (pid %PID%) > "%LOG%"',
         "set /a W=0",
         ":wait",
-        'tasklist /FI "PID eq %PID%" 2>nul | find "%PID%" >nul',
+        'tasklist /FI "PID eq %PID%" /NH > "%CHK%" 2>nul',
+        'find "%PID%" "%CHK%" >nul 2>&1',
         "if errorlevel 1 goto copy",
         "set /a W+=1",
         "if %W% GEQ 90 goto copy",
@@ -146,9 +148,15 @@ def launch_helper(new_dir: Path) -> None:
     work.mkdir(parents=True, exist_ok=True)
     script = work / "apply_update.cmd"
     script.write_bytes(build_script().encode("ascii"))
-    flags = (getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-             | getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    # CREATE_NO_WINDOW (not DETACHED_PROCESS): the helper gets one hidden console that tasklist/robocopy/ping inherit,
+    # so no black terminal windows pop up while the update is applied.
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    startup = None
+    if os.name == "nt":
+        startup = subprocess.STARTUPINFO()
+        startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startup.wShowWindow = 0                                  # SW_HIDE
     args = ["cmd.exe", "/c", str(script), str(os.getpid()), str(app_dir()).rstrip("\\/"), str(new_dir).rstrip("\\/"),
             str(app_dir() / EXE_NAME), str(work / "update.log")]
-    subprocess.Popen(args, creationflags=flags, close_fds=True, stdin=subprocess.DEVNULL,
+    subprocess.Popen(args, creationflags=flags, startupinfo=startup, close_fds=True, stdin=subprocess.DEVNULL,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
