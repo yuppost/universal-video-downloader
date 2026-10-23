@@ -1,6 +1,6 @@
 """Universal Video Studio - download, trim and crop multiple clips from one video."""
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 APP_NAME = "Universal Video Studio"
 
 # Where the app looks for "a new version exists". Put your published latest.json here: a Google Drive share link,
