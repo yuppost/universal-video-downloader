@@ -315,23 +315,39 @@ Test commands and development requirements should be documented alongside the pr
 
 ## License
 
+<<<<<<< HEAD
 Universal Video Studio is licensed under the Apache License, Version 2.0. See the [LICENSE](LICENSE) file for the complete license text.
 
 You may use, reproduce, modify, distribute, sublicense, and sell copies of the project under the terms of the Apache License 2.0. Redistribution must comply with the license requirements, including retaining applicable copyright, patent, trademark, and attribution notices and providing a copy of the license.
 
 This license applies to the original project code covered by the project's copyright. Third-party tools, libraries, and bundled components remain subject to their respective licenses and terms.
+=======
+Universal Video Studio is licensed under the MIT License. See the [LICENSE](LICENSE) file for the complete license text.
+
+The MIT License permits use, copying, modification, distribution, sublicensing, and sale of copies of the project, provided that the required copyright and license notices are retained.
+
+This license applies to the original project code covered by the project's copyright. Third-party tools, libraries, and bundled components remain subject to their own licenses and terms.
+>>>>>>> e991dec (img)
 
 ## Third-Party Licenses
 
 Universal Video Studio may use or interact with third-party software, including:
 
 - **Python** — Python Software Foundation License.
+<<<<<<< HEAD
 - **yt-dlp** — Unlicense, subject to applicable notices and third-party component licenses.
+=======
+- **yt-dlp** — Unlicense, with applicable notices and third-party component licenses.
+>>>>>>> e991dec (img)
 - **FFmpeg** — Licensing depends on the specific build and enabled components; LGPL or GPL terms may apply.
 - **Deno** — MIT License.
 - **Other dependencies** — Subject to their respective licenses.
 
+<<<<<<< HEAD
 Check the official project documentation and license files for the versions and builds you use. When distributing a packaged application, include required notices and comply with all applicable license conditions.
+=======
+Check the official project documentation and license files for the versions and builds you use. If distributing a packaged application, include required notices and comply with all applicable license conditions.
+>>>>>>> e991dec (img)
 
 Official resources:
 
@@ -342,7 +358,11 @@ Official resources:
 
 ## Disclaimer
 
+<<<<<<< HEAD
 This software is provided "as is", without warranty of any kind, express or implied. See the Apache License 2.0 in the [LICENSE](LICENSE) file for the full warranty disclaimer and limitation of liability.
+=======
+This software is provided "as is", without warranty of any kind, express or implied. See the MIT License for the full warranty disclaimer and limitation of liability.
+>>>>>>> e991dec (img)
 
 Universal Video Studio is not affiliated with, endorsed by, or officially connected to the websites supported by yt-dlp unless explicitly stated.
 
