@@ -16,6 +16,7 @@ from app.config import BROWSERS, QUALITIES, Settings
 from app.models.crop import ASPECT_PRESETS
 from app.services import ytdlp_service as yd
 from app.services.ffmpeg_service import ffmpeg_version, find_executable
+from app.utils import wheel_guard
 from app.utils.paths import dir_size, human_size
 
 
@@ -39,9 +40,11 @@ class SettingsDialog(QDialog):
         self._found = None
 
         self.download_dir = self._path_row(settings.download_dir, folder=True)
+        self.audio_dir = self._path_row(settings.audio_dir, folder=True)
         self.temp_dir = self._path_row(settings.temp_dir, folder=True)
-        self.ffmpeg = self._path_row(settings.ffmpeg_path, folder=False)
-        self.ffmpeg[0].setPlaceholderText("Leave empty to auto-detect (PATH or ./ffmpeg/bin)")
+        self.ffmpeg = self._path_row(settings.ffmpeg_path, folder=False)      # not shown: keeps a custom path set earlier
+        self.ffmpeg[1].setParent(self)
+        self.ffmpeg[1].hide()
         self.fmt = QComboBox()
         self.fmt.addItem("MP4 video", "mp4")
         self.fmt.addItem("MP3 audio only", "mp3")
@@ -85,13 +88,13 @@ class SettingsDialog(QDialog):
             self.browser.addItem(b.capitalize() if b else "None (use the saved sign-ins only)", b)
         self.browser.setToolTip("Advanced: for sites you have NOT signed in to in the app, let yt-dlp read the cookies "
                                 "from this browser while downloading. Saved sign-ins always win.")
-        self.check_start = QCheckBox("Check the yt-dlp version when the app starts")
         self.check_app = QCheckBox("Tell me when a new version of this app is available")
         self.btn_setup = QPushButton("Setup: install / check FFmpeg and yt-dlp...")
         self.btn_setup.clicked.connect(self._open_setup)
 
         form = QFormLayout()
         form.addRow("Video folder (downloads)", self.download_dir[1])
+        form.addRow("Audio folder (MP3 downloads)", self.audio_dir[1])
         form.addRow("Default format", self.fmt)
         form.addRow("Preferred quality", self.quality)
         form.addRow("Default crop", self.crop)
@@ -102,10 +105,6 @@ class SettingsDialog(QDialog):
         form.addRow("Max simultaneous tasks", self.concurrent)
         form.addRow("Theme", self.theme)
         form.addRow("", self.btn_setup)
-        form.addRow("FFmpeg executable", self.ffmpeg[1])
-        self.ff_status = QLabel("")
-        self.ff_status.setObjectName("muted")
-        form.addRow("", self.ff_status)
         form.addRow("Cache video folder (preview/temp)", self.temp_dir[1])
         form.addRow("Cleanup", self.cleanup)
         form.addRow("", self.keep_inter)
@@ -123,7 +122,6 @@ class SettingsDialog(QDialog):
         btn_cookies.clicked.connect(self.cookiesRequested)
         form.addRow("Sign-in", btn_cookies)
         form.addRow("Fallback browser", self.browser)
-        form.addRow("", self.check_start)
         form.addRow("", self.check_app)
         self.about = QLabel(f"<b>{APP_NAME}</b> version <b>{__version__}</b> &nbsp;·&nbsp; yt-dlp {yd.ytdlp_version()}")
         self.about.setTextFormat(Qt.RichText)
@@ -143,7 +141,11 @@ class SettingsDialog(QDialog):
         urow.addWidget(self.check_result, 1)
         form.addRow("Updates", urow)
 
-        box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel | QDialogButtonBox.RestoreDefaults)
+        self.btn_restore = box.button(QDialogButtonBox.RestoreDefaults)
+        self.btn_restore.setText("Restore defaults")
+        self.btn_restore.setToolTip("Put every setting on this page back to its original value (nothing changes until you press Save)")
+        self.btn_restore.clicked.connect(self._restore_defaults)
         box.accepted.connect(self.accept)
         box.rejected.connect(self.reject)
         host = QWidget()
@@ -161,13 +163,11 @@ class SettingsDialog(QDialog):
         if scr:
             self.resize(min(self.width(), scr.width() - 40), min(self.height(), scr.height() - 80))
         self._load()
-        self.ffmpeg[0].textChanged.connect(self._ff_check)
-        self._ff_check()
+        wheel_guard.install(self)
 
     def _open_setup(self) -> None:
         from app.widgets.dependency_dialog import DependencyDialog
         DependencyDialog(self.ffmpeg[0].text().strip(), self, self.hw.currentData()).exec()
-        self._ff_check()
         self.about.setText(f"<b>{APP_NAME}</b> version <b>{__version__}</b> &nbsp;·&nbsp; yt-dlp {yd.ytdlp_version()}")
 
     def _path_row(self, value: str, folder: bool, title: str = "Locate ffmpeg executable", filt: str = ""):
@@ -194,8 +194,22 @@ class SettingsDialog(QDialog):
         btn.clicked.connect(pick)
         return edit, w
 
-    def _load(self) -> None:
-        s = self.s
+    def _restore_defaults(self) -> None:
+        if QMessageBox.question(self, "Restore defaults",
+                                "Put all settings on this page back to their original values?\n"
+                                "Nothing is saved until you press Save. Saved sign-ins are not affected.") != QMessageBox.Yes:
+            return
+        d = Settings()
+        self._load(d)
+        self.download_dir[0].setText(d.download_dir)
+        self.audio_dir[0].setText(d.audio_dir)
+        self.temp_dir[0].setText(d.temp_dir)
+        self.ffmpeg[0].setText(d.ffmpeg_path)
+        self.template.setText(d.filename_template)
+        self.check_result.setText("Defaults loaded - press Save to keep them.")
+
+    def _load(self, s: Optional[Settings] = None) -> None:
+        s = s or self.s
         for combo, val in ((self.fmt, s.output_format), (self.quality, s.preferred_quality), (self.crop, s.default_crop),
                            (self.trim, s.trim_mode), (self.codec, s.video_codec), (self.hw, s.hw_encoder), (self.theme, s.theme),
                            (self.cleanup, s.cleanup_mode), (self.browser, s.cookies_browser)):
@@ -204,14 +218,8 @@ class SettingsDialog(QDialog):
         self.keep_inter.setChecked(s.keep_intermediates)
         self.cache_limit.setValue(s.cache_limit_gb)
         self.sections.setChecked(s.prefer_sections)
-        self.check_start.setChecked(s.ytdlp_check_on_start)
         self.check_app.setChecked(s.check_app_updates)
         self.cache_label.setText(f"Cache in use: {human_size(dir_size(s.cache_dir))}")
-
-    def _ff_check(self) -> None:
-        p = find_executable("ffmpeg", self.ffmpeg[0].text().strip())
-        self.ff_status.setText(f"Found: {ffmpeg_version(p)}\n{p}" if p else
-                               "FFmpeg not found - install it or browse to ffmpeg.exe (see README).")
 
     def _clear_cache(self) -> None:
         size = human_size(dir_size(self.s.cache_dir))
@@ -248,6 +256,7 @@ class SettingsDialog(QDialog):
     def result_settings(self) -> Settings:
         s = self.s
         s.download_dir = self.download_dir[0].text().strip() or s.download_dir
+        s.audio_dir = self.audio_dir[0].text().strip() or s.audio_dir
         s.temp_dir = self.temp_dir[0].text().strip() or s.temp_dir
         s.ffmpeg_path = self.ffmpeg[0].text().strip()
         s.output_format = self.fmt.currentData()
@@ -264,7 +273,6 @@ class SettingsDialog(QDialog):
         s.cache_limit_gb = self.cache_limit.value()
         s.prefer_sections = self.sections.isChecked()
         s.cookies_browser = self.browser.currentData()
-        s.ytdlp_check_on_start = self.check_start.isChecked()
         s.check_app_updates = self.check_app.isChecked()
         s.sanitize()
         return s

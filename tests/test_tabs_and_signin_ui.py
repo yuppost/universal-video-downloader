@@ -414,3 +414,140 @@ def test_settings_shows_version_update_check_and_no_icon_or_ytdlp_row(qapp, tmp_
     assert got and got[0].version == "9.9.9"
     dlg._update_checked("error", None)
     assert "Could not check" in dlg.check_result.text()
+
+
+def test_crop_enabled_without_selection_and_section_arrows(tmp_path):
+    """Crop works as soon as a video is loaded: it makes (or picks) a clip itself. Section headers use drawn chevrons."""
+    from PySide6.QtWidgets import QApplication
+    from app.config import Settings
+    from app.main_window import MainWindow
+    from app.services import ytdlp_service as yd
+    app = QApplication.instance() or QApplication([])
+    win = MainWindow(Settings(temp_dir=str(tmp_path / "t"), download_dir=str(tmp_path / "o")))
+    w = win.current()
+    w._on_analyzed(yd.VideoInfo("https://example.com/v", "vid", "T", "", 60.0, "", "G",
+                                [yd.FormatInfo("1", "mp4", 360, 640, 25, "avc1", "aac", None, None)]))
+    app.processEvents()
+    assert w.crop_controls.isEnabled() and len(w.clips) == 0
+    assert w.sec_crop.header.text() == "Crop / Aspect Ratio" and not w.sec_crop.header.icon().isNull()
+    assert not w.out_dir.isVisible() and not w.btn_out.isVisible()
+    idx = w.crop_controls.combo.findData("16:9") if w.crop_controls.combo.findData("16:9") >= 0 else 1
+    w.crop_controls.combo.setCurrentIndex(idx)
+    assert len(w.clips) == 1 and w.selected_id() is not None
+    assert w.clips.clips[0].crop.preset == w.crop_controls.combo.currentData()
+    win.controller.shutdown()
+
+
+def test_downloads_toggle_is_an_icon_shown_only_while_hidden_and_preview_is_a_queue_job(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication, QMessageBox
+    from app.config import Settings
+    from app.main_window import MainWindow
+    from app.models.download_job import JobKind
+    from app.services import ytdlp_service as yd
+    from app.widgets import workspace as wsmod
+    app = QApplication.instance() or QApplication([])
+    win = MainWindow(Settings(temp_dir=str(tmp_path / "t"), download_dir=str(tmp_path / "o"), ffmpeg_path="ffmpeg"))
+    win.resize(1500, 900)
+    win.show()
+    win._panel_user_choice = True
+    win._update_panel_visibility()
+    app.processEvents()
+    assert win.panel.isVisible() and not win.btn_downloads.isVisible()
+    assert win.btn_hide_panel.text() == "" and not win.btn_hide_panel.icon().isNull()
+    win.btn_hide_panel.click()
+    assert not win.panel.isVisible() and win.btn_downloads.isVisible() and win.btn_downloads.text() == ""
+    win.btn_downloads.click()
+    assert win.panel.isVisible() and not win.btn_downloads.isVisible()
+
+    w = win.current()
+    assert not w.btn_preview_dl.isVisible()
+    w._on_analyzed(yd.VideoInfo("https://example.com/v", "vid", "T", "", 60.0, "", "G",
+                                [yd.FormatInfo("1", "mp4", 360, 640, 25, "avc1", "aac", None, None)]))
+    app.processEvents()
+    assert w.btn_preview_dl.isVisible()                                # the option is always there, not only on errors
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
+    monkeypatch.setattr(wsmod, "require_ffmpeg", lambda p: "ffmpeg")
+    monkeypatch.setattr(win.controller, "_pump", lambda: None)           # do not really download
+    w.request_preview_download()
+    jobs = [j for j in win.controller.queue.jobs if j.kind == JobKind.SOURCE]
+    assert len(jobs) == 1 and "Preview" in jobs[0].name and jobs[0].payload.selector == wsmod.PREVIEW_SELECTOR
+    assert not w.btn_preview_dl.isVisible()
+    win.controller.cancel(jobs[0].id)
+    app.processEvents()
+    assert not w._preview_busy
+    win.controller.shutdown()
+
+
+def test_settings_wheel_restore_defaults_and_trimmed_options(tmp_path, monkeypatch):
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtWidgets import QApplication, QMessageBox
+    from app.config import Settings
+    from app.widgets.settings_dialog import SettingsDialog
+    app = QApplication.instance() or QApplication([])
+    s = Settings(temp_dir=str(tmp_path / "t"), download_dir=str(tmp_path / "o"), theme="light", max_concurrent=5,
+                 trim_mode="accurate", filename_template="x_{index}")
+    dlg = SettingsDialog(s)
+    dlg.show()
+    app.processEvents()
+    assert not hasattr(dlg, "check_start")
+    before = dlg.theme.currentIndex()
+    ev = QWheelEvent(QPointF(5, 5), QPointF(5, 5), QPoint(0, 0), QPoint(0, -120), Qt.NoButton, Qt.NoModifier,
+                     Qt.NoScrollPhase, False)
+    app.sendEvent(dlg.theme, ev)
+    app.sendEvent(dlg.concurrent, ev)
+    assert dlg.theme.currentIndex() == before and dlg.concurrent.value() == 5      # not focused: the wheel does nothing
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
+    dlg.btn_restore.click()
+    d = Settings()
+    assert dlg.theme.currentData() == "dark" and dlg.concurrent.value() == d.max_concurrent
+    assert dlg.trim.currentData() == "fast" and dlg.template.text() == d.filename_template
+    assert dlg.download_dir[0].text() == d.download_dir
+    assert s.theme == "light"                                                     # only applied on Save
+
+
+def test_mp3_mode_labels_waveform_audio_folder_and_settings_rows(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from app.config import Settings
+    from app.main_window import MainWindow
+    from app.services import ytdlp_service as yd
+    from app.widgets.settings_dialog import SettingsDialog
+    app = QApplication.instance() or QApplication([])
+    s = Settings(temp_dir=str(tmp_path / "t"), download_dir=str(tmp_path / "v"), audio_dir=str(tmp_path / "a"),
+                 ffmpeg_path="C:/custom/ffmpeg.exe")
+    # settings: audio folder row, no FFmpeg executable row, custom path kept
+    dlg = SettingsDialog(s)
+    dlg.show()
+    app.processEvents()
+    assert dlg.audio_dir[0].text() == str(tmp_path / "a") and not hasattr(dlg, "ff_status")
+    assert not dlg.ffmpeg[1].isVisible()
+    assert dlg.result_settings().ffmpeg_path == "C:/custom/ffmpeg.exe"
+    assert Settings().audio_dir.endswith("Audio") and Settings().audio_dir != Settings().download_dir
+
+    win = MainWindow(s)
+    w = win.current()
+    w._on_analyzed(yd.VideoInfo("https://example.com/v", "vid", "T", "", 60.0, "", "G",
+                                [yd.FormatInfo("1", "mp4", 360, 640, 25, "avc1", "aac", None, None)]))
+    app.processEvents()
+    assert w.btn_full.text() == "Full Video" and w.btn_all.text() == "Download All Clips"
+    assert not w.timeline.canvas.wave_mode
+    w.fmt.setCurrentIndex(w.fmt.findData("mp3"))
+    app.processEvents()
+    assert w.btn_full.text() == "Full MP3" and w.btn_all.text() == "Download All MP3 Clips"
+    assert w.btn_sel.text() == "Selected MP3" and w.timeline.canvas.wave_mode
+    assert "audio" in w.btn_preview_dl.toolTip().lower()
+    w.timeline.set_peaks([0.1, 0.9, 0.4] * 100)
+    w.timeline.canvas.grab()                                   # paints the waveform strip without errors
+    w.fmt.setCurrentIndex(w.fmt.findData("mp4"))
+    assert w.btn_full.text() == "Full Video" and not w.timeline.canvas.wave_mode
+    win.controller.shutdown()
+
+
+def test_waveform_peaks_math():
+    from array import array
+    from app.services.waveform_service import bin_count, peaks_from_samples
+    a = array("h", [0] * 1000 + [16384] * 1000 + [-32768] * 1000)
+    pk = peaks_from_samples(a, 3)
+    assert pk == [0.0, 0.5, 1.0]
+    assert bin_count(1) == 200 and bin_count(100) == 400 and bin_count(10 ** 6) == 4000
+    assert peaks_from_samples(array("h"), 5) == []

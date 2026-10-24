@@ -15,3 +15,4 @@ class TaskSignals(QObject):
     preview_ready = Signal(str, str)   # path, error ("" if ok)
     thumbnail = Signal(int, float, str)
     thumbnails_done = Signal()
+    waveform = Signal(str, object)      # media path, list of 0..1 peaks (empty = no audio / failed)

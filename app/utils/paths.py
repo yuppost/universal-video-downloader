@@ -116,6 +116,11 @@ def default_download_dir() -> Path:
     return videos_root() / "Video"
 
 
+def default_audio_dir() -> Path:
+    """MP3 downloads and exported audio clips."""
+    return videos_root() / "Audio"
+
+
 def default_temp_dir() -> Path:
     """Cache: low-quality preview files, source downloads, thumbnails."""
     return videos_root() / "Cache video"

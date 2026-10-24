@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any, Dict
 
-from app.utils.paths import app_data_dir, default_download_dir, default_temp_dir, legacy_defaults
+from app.utils.paths import app_data_dir, default_audio_dir, default_download_dir, default_temp_dir, legacy_defaults
 
 log = logging.getLogger("uvs.config")
 
@@ -20,6 +20,7 @@ BROWSERS = ["", "chrome", "edge", "firefox", "brave", "opera", "vivaldi", "chrom
 @dataclass
 class Settings:
     download_dir: str = ""
+    audio_dir: str = ""                   # MP3 downloads / audio clips
     output_format: str = "mp4"            # mp4 | mp3
     preferred_quality: str = "best"       # best | 2160 | ... | 360
     default_crop: str = "original"
@@ -46,6 +47,8 @@ class Settings:
     def __post_init__(self) -> None:
         if not self.download_dir:
             self.download_dir = str(default_download_dir())
+        if not self.audio_dir:
+            self.audio_dir = str(default_audio_dir())
         if not self.temp_dir:
             self.temp_dir = str(default_temp_dir())
 

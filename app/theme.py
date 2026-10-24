@@ -42,7 +42,9 @@ def stylesheet(name: str) -> str:
     QLineEdit:hover, QComboBox:hover, QSpinBox:hover {{ border-color: {p['muted']}; }}
     QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {{ border: 1px solid {p['accent']}; }}
     QLineEdit:disabled, QComboBox:disabled {{ color: {p['muted']}; }}
-    QComboBox::drop-down {{ border: none; width: 24px; }}
+    QComboBox::drop-down {{ border: none; width: 26px; subcontrol-origin: padding; subcontrol-position: center right; }}
+    QComboBox::down-arrow {{ image: url("{_arrow_file(p['text'])}"); width: 14px; height: 14px; }}
+    QComboBox::down-arrow:disabled {{ image: url("{_arrow_file(p['muted'])}"); }}
     QComboBox QAbstractItemView {{ background: {p['panel']}; selection-background-color: {p['accent']};
         selection-color: {p['accent_text']}; border: 1px solid {p['border']}; border-radius: 8px; padding: 4px; outline: 0; }}
     QPushButton, QToolButton {{ background: {p['panel2']}; border: 1px solid transparent; border-radius: 9px;
@@ -133,6 +135,26 @@ def stylesheet(name: str) -> str:
     """
 
 
+def _arrow_file(color: str) -> str:
+    """A small chevron PNG for combo boxes (style sheets can only reference image files)."""
+    import tempfile
+    from pathlib import Path
+    try:
+        f = Path(tempfile.gettempdir()) / f"uvs_arrow_{color.lstrip('#')}.png"
+        if not f.exists():
+            pm = QPixmap(48, 48)
+            pm.fill(Qt.transparent)
+            pt = QPainter(pm)
+            pt.setRenderHint(QPainter.Antialiasing)
+            pt.scale(2, 2)
+            _draw_chev_down(pt, QColor(color))
+            pt.end()
+            pm.save(str(f), "PNG")
+        return f.as_posix()
+    except Exception:
+        return ""
+
+
 def apply_theme(app: QApplication, name: str) -> None:
     global _current
     _current = name if name in PALETTES else "dark"
@@ -191,6 +213,12 @@ def _draw_fit(p, c):
 def _draw_reset(p, c):
     p.setPen(QPen(c, 2.4)); p.drawArc(QRectF(5, 5, 14, 14), 90 * 16, 270 * 16)
     p.fillPath(_poly([(12, 1), (12, 9), (6, 5)]), c)
+def _draw_chev_down(p, c):
+    p.setPen(QPen(c, 2.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)); p.drawLine(6, 9, 12, 15); p.drawLine(12, 15, 18, 9)
+def _draw_chev_right(p, c):
+    p.setPen(QPen(c, 2.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)); p.drawLine(9, 6, 15, 12); p.drawLine(15, 12, 9, 18)
+def _draw_chev_left(p, c):
+    p.setPen(QPen(c, 2.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)); p.drawLine(15, 6, 9, 12); p.drawLine(9, 12, 15, 18)
 def _draw_play_range(p, c):
     p.fillPath(_poly([(6, 5), (16, 12), (6, 19)]), c); p.fillRect(QRectF(18, 5, 3, 14), c)
 
@@ -201,7 +229,7 @@ _DRAW: Dict[str, Callable] = {
     "settings": _draw_gear, "retry": _draw_retry, "cancel": _draw_x, "scissors": _draw_scissors,
     "paste": _draw_clipboard, "download": _draw_download, "up": _draw_up, "down": _draw_down,
     "zoom_in": _draw_zoom_in, "zoom_out": _draw_zoom_out, "fit": _draw_fit, "reset": _draw_reset,
-    "play_range": _draw_play_range,
+    "play_range": _draw_play_range, "chev_down": _draw_chev_down, "chev_right": _draw_chev_right, "chev_left": _draw_chev_left,
 }
 
 

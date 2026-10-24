@@ -109,6 +109,8 @@ class TimelineCanvas(QWidget):
         self._group: Dict[str, Tuple[float, float]] = {}
         self.thumbs: Dict[int, Tuple[float, QPixmap]] = {}
         self.thumb_slot = 0.0       # seconds per thumbnail slot
+        self.wave_mode = False      # MP3: the strip shows the audio waveform instead of video thumbnails
+        self.peaks: List[float] = []
         self._drag: Optional[Tuple[str, str, float, float, float]] = None  # (mode, clip id, anchor t, start0, end0)
         self._scrub = False
         self._lanes: Dict[str, int] = {}
@@ -138,6 +140,7 @@ class TimelineCanvas(QWidget):
     def set_duration(self, d: float) -> None:
         self.duration = max(0.0, d)
         self.thumbs.clear()
+        self.peaks = []
         self.fit()
 
     def fit(self) -> None:
@@ -192,6 +195,18 @@ class TimelineCanvas(QWidget):
 
     def select_all(self) -> None:
         self.select_many([c.id for c in self.clips.clips])
+
+    def set_wave_mode(self, on: bool) -> None:
+        if on != self.wave_mode:
+            self.wave_mode = on
+            self.update()
+
+    def set_peaks(self, peaks: Optional[List[float]]) -> None:
+        self.peaks = list(peaks or [])
+        self.update()
+
+    def _has_thumbs(self) -> bool:
+        return bool(self.thumbs) and self.thumb_slot > 0 and not self.wave_mode
 
     def add_thumbnail(self, index: int, t: float, pix: QPixmap, slot: float) -> None:
         self.thumbs[index] = (t, pix)
@@ -266,6 +281,9 @@ class TimelineCanvas(QWidget):
     def _paint_strip(self, p: QPainter, pal, w: int) -> None:
         top = RULER_H
         p.fillRect(0, top, w, self.strip_h, QColor(pal["panel2"]))
+        if self.wave_mode:
+            self._paint_wave(p, pal, w, top)
+            return
         if not self.thumbs or self.thumb_slot <= 0:
             p.setPen(QColor(pal["muted"]))
             p.setFont(QFont(self.font().family(), 8))
@@ -278,6 +296,33 @@ class TimelineCanvas(QWidget):
             if x1 < 0 or x0 > w:
                 continue
             p.drawPixmap(QRectF(x0, top, x1 - x0 + 1, self.strip_h), pix, QRectF(pix.rect()))
+
+    def _paint_wave(self, p: QPainter, pal, w: int, top: int) -> None:
+        """Mirrored loudness bars, one per pixel column (max of the peaks that fall into it)."""
+        if not self.peaks or self.duration <= 0:
+            p.setPen(QColor(pal["muted"]))
+            p.setFont(QFont(self.font().family(), 8))
+            p.drawText(QRectF(6, top, w - 12, self.strip_h), Qt.AlignVCenter | Qt.AlignLeft,
+                       "The audio waveform appears once audio data is available locally")
+            return
+        n = len(self.peaks)
+        per = self.duration / n                              # seconds per peak
+        mid = top + self.strip_h / 2
+        half = self.strip_h / 2 - 3
+        col = QColor(pal["accent"])
+        p.setPen(Qt.NoPen)
+        p.setBrush(col)
+        x = 0
+        step = 2                                             # 2 px bars keep it light
+        while x < w:
+            a = max(0, int(self.x2t(x) / per))
+            b = min(n, max(a + 1, int(self.x2t(x + step) / per) + 1))
+            if a >= n:
+                break
+            amp = max(self.peaks[a:b])
+            h = max(1.0, amp ** 0.7 * half)
+            p.drawRect(QRectF(x, mid - h, step - 0.5, 2 * h))
+            x += step
 
     def _paint_ruler(self, p: QPainter, pal, w: int) -> None:
         step = choose_tick_step(self.pps)
@@ -333,7 +378,7 @@ class TimelineCanvas(QWidget):
                 p.drawLine(int(cx), int(hr.top() + 8), int(cx), int(hr.bottom() - 8))
             # label
             label = f"{c.name}  {format_timestamp(c.duration, with_ms=c.duration < 10)}"
-            used = (min(54.0, r.width() / 3) + 6) if (self.thumbs and self.thumb_slot > 0 and r.width() >= 90) else 0
+            used = (min(54.0, r.width() / 3) + 6) if (self._has_thumbs() and r.width() >= 90) else 0
             inner = r.adjusted(HANDLE_W + 3 + used, 0, -HANDLE_W - 3, 0)
             if inner.width() > 20:
                 p.setPen(QColor("#0b1220") if col.lightness() > 150 else QColor("#ffffff"))
@@ -342,7 +387,7 @@ class TimelineCanvas(QWidget):
 
     def _paint_clip_thumb(self, p: QPainter, c: Clip, r: QRectF) -> None:
         """Small frame from the clip's start, like the clip blocks of a video editor."""
-        if not self.thumbs or self.thumb_slot <= 0 or r.width() < 90:
+        if not self._has_thumbs() or r.width() < 90:
             return
         idx = min(self.thumbs, key=lambda i: abs(self.thumbs[i][0] - c.start))
         pix = self.thumbs[idx][1]
@@ -642,6 +687,12 @@ class TimelineWidget(QWidget):
     def set_duration(self, d: float) -> None:
         self.canvas.set_duration(d)
         self._sync_scroll()
+
+    def set_wave_mode(self, on: bool) -> None:
+        self.canvas.set_wave_mode(on)
+
+    def set_peaks(self, peaks) -> None:
+        self.canvas.set_peaks(peaks)
 
     def set_strip_height(self, h: int) -> None:
         self.canvas.strip_h = h

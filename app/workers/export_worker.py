@@ -13,6 +13,7 @@ from app.models.download_job import DownloadJob, JobStatus
 from app.services.errors import FriendlyError, OperationCanceled
 from app.services.export_service import ClipSpec, execute_clip_export
 from app.services.thumbnail_service import generate_strip
+from app.services.waveform_service import compute_peaks
 from app.workers.task_signals import TaskSignals
 
 log = logging.getLogger("uvs.exportworker")
@@ -62,3 +63,26 @@ class ThumbnailTask(QRunnable):
             log.exception("Thumbnail generation failed")
         finally:
             self.signals.thumbnails_done.emit()
+
+
+class WaveformTask(QRunnable):
+    """Computes the audio waveform shown on the timeline in MP3 mode."""
+
+    def __init__(self, ffmpeg: str, source: Path, duration: float, signals: TaskSignals,
+                 cancel: threading.Event) -> None:
+        super().__init__()
+        self.setAutoDelete(True)
+        self.a = (ffmpeg, source, duration)
+        self.signals, self.cancel = signals, cancel
+
+    def run(self) -> None:
+        ffmpeg, source, duration = self.a
+        try:
+            peaks = compute_peaks(ffmpeg, source, duration, self.cancel)
+        except OperationCanceled:
+            return
+        except Exception:  # noqa: BLE001
+            log.exception("Waveform generation failed")
+            peaks = []
+        if not self.cancel.is_set():
+            self.signals.waveform.emit(str(source), peaks)

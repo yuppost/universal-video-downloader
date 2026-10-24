@@ -178,12 +178,14 @@ class MainWindow(QMainWindow):
         self.btn_signins = QPushButton("Cookies && sign-ins")
         self.btn_signins.setToolTip("Sign in to a site once - the app saves the cookies and reuses them "
                                     "(private, age-restricted and 'not a bot' videos)")
-        self.btn_downloads = QPushButton("Downloads")
+        self.btn_downloads = QPushButton(theme.icon("chev_left", size=18), "")     # only visible while the panel is hidden
         self.btn_downloads.setCheckable(True)
-        self.btn_downloads.setToolTip("Show or hide the download queue and export history")
+        self.btn_downloads.setToolTip("Show the downloads panel (queue and export history)")
+        self.btn_downloads.setFixedWidth(40)
+        self.btn_downloads.setVisible(False)
         self.btn_settings = QPushButton(theme.icon("settings", size=16), "Settings")
         self.btn_settings.setToolTip("Open settings (Ctrl+,)")
-        for b in (self.btn_signins, self.btn_downloads, self.btn_settings):
+        for b in (self.btn_signins, self.btn_settings, self.btn_downloads):
             cl.addWidget(b)
         self.tabs.setCornerWidget(corner, Qt.TopRightCorner)
 
@@ -195,7 +197,9 @@ class MainWindow(QMainWindow):
         head = QHBoxLayout()
         title = QLabel("Downloads")
         title.setObjectName("panelTitle")
-        self.btn_hide_panel = QPushButton("Hide")
+        self.btn_hide_panel = QPushButton(theme.icon("chev_right", size=18), "")
+        self.btn_hide_panel.setToolTip("Hide the downloads panel")
+        self.btn_hide_panel.setFixedWidth(40)
         head.addWidget(title)
         head.addStretch(1)
         head.addWidget(self.btn_hide_panel)
@@ -378,6 +382,7 @@ class MainWindow(QMainWindow):
     def _toggle_panel(self, on: bool) -> None:
         self._panel_user_choice = on
         self.panel.setVisible(on)
+        self.btn_downloads.setVisible(not on)
 
     def _update_panel_visibility(self) -> None:
         if self._panel_user_choice is None:
@@ -388,6 +393,7 @@ class MainWindow(QMainWindow):
         self.btn_downloads.blockSignals(True)
         self.btn_downloads.setChecked(show)
         self.btn_downloads.blockSignals(False)
+        self.btn_downloads.setVisible(not show)
 
     def _show_queue(self) -> None:
         self.manager.tabs.setCurrentIndex(0)
@@ -512,6 +518,8 @@ class MainWindow(QMainWindow):
 
     def _refresh_icons(self) -> None:
         self.btn_settings.setIcon(theme.icon("settings", size=16))
+        self.btn_downloads.setIcon(theme.icon("chev_left", size=18))
+        self.btn_hide_panel.setIcon(theme.icon("chev_right", size=18))
         for ws in self.workspaces():
             ws.refresh_icons()
         self.manager.refresh_icons()

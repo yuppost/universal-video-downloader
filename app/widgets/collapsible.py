@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import QToolButton, QVBoxLayout, QWidget
 
 
@@ -17,7 +17,8 @@ class CollapsibleSection(QWidget):
         self.content = content
         self.header = QToolButton()
         self.header.setObjectName("sectionHeader")
-        self.header.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.header.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.header.setIconSize(QSize(16, 16))
         self.header.setCheckable(True)
         self.header.setChecked(expanded)
         self.header.setSizePolicy(self.header.sizePolicy().horizontalPolicy(), self.header.sizePolicy().verticalPolicy())
@@ -33,8 +34,13 @@ class CollapsibleSection(QWidget):
         self.header.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     def _toggle(self, on: bool) -> None:
-        self.header.setText(f"{'v' if on else '>'}   {self.title}".replace("&", "&&"))   # && = literal & on a button
+        self.header.setText(self.title.replace("&", "&&"))   # && = literal & on a button
+        self.refresh_icons()
         self.content.setVisible(on)
+
+    def refresh_icons(self) -> None:
+        from app import theme
+        self.header.setIcon(theme.icon("chev_down" if self.header.isChecked() else "chev_right", size=16))
 
     def is_expanded(self) -> bool:
         return self.header.isChecked()

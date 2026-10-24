@@ -95,7 +95,7 @@ class DependencyDialog(QDialog):
         s, b, _bar = self.rows["ffmpeg"]
         if st.ffmpeg_ok:
             s.setText(f"Installed - {st.ffmpeg_version.split(' Copyright')[0]}\n{st.ffmpeg_path}")
-            b.setText("Reinstall")
+            b.setText("Update")
         else:
             missing = " and ".join(n for n, p in (("FFmpeg", st.ffmpeg_path), ("FFprobe", st.ffprobe_path)) if not p)
             s.setText(f"MISSING: {missing}. Required for trimming, cropping and merging.")
@@ -110,7 +110,7 @@ class DependencyDialog(QDialog):
         s, b, _bar = self.rows["deno"]
         if st.youtube_ok:
             s.setText(f"Ready - {st.js_runtime}. YouTube downloads can solve their challenges.")
-            b.setText("Reinstall Deno")
+            b.setText("Update")
         elif not st.ejs_ok:
             s.setText("MISSING: the yt-dlp YouTube component (yt-dlp-ejs). Click 'Install yt-dlp' above to add it.")
             b.setText("Download Deno (~40 MB)")

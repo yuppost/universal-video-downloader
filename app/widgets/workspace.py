@@ -35,18 +35,20 @@ from app.utils.validation import UrlValidationError, format_timestamp, site_name
 from app.widgets import browser_login
 from app.widgets.clip_list import ClipListWidget
 from app.widgets.collapsible import CollapsibleSection
+from app.utils import wheel_guard
 from app.widgets.crop_editor import CropControls
 from app.widgets.playlist_dialog import PlaylistDialog
 from app.widgets.timeline import TimelineWidget
 from app.widgets.video_preview import VideoPreview
 from app.workers.analyze_worker import AnalyzeWorker
-from app.workers.download_worker import PreviewDownloadTask
-from app.workers.export_worker import ThumbnailTask
+from app.workers.export_worker import ThumbnailTask, WaveformTask
 from app.workers.job_controller import JobController
 from app.workers.task_signals import TaskSignals
 
 log = logging.getLogger("uvs.workspace")
 PREVIEW_SELECTOR = "b[height<=480]/bv*[height<=480]+ba/w"
+AUDIO_PREVIEW_SELECTOR = "wa/ba/w"           # MP3 mode: a small audio-only copy is enough for playback and the waveform
+AUDIO_EXTS = {".m4a", ".mp3", ".opus", ".ogg", ".aac", ".wav", ".flac"}
 THUMB_COUNT = 40
 
 
@@ -91,6 +93,11 @@ class Workspace(QWidget):
         self._thumb_cancel = threading.Event()
         self._preview_cancel = threading.Event()
         self._preview_busy = False
+        self._preview_job_id: Optional[str] = None
+        self._local_audio_only = False
+        self._thumbs_for: Optional[Path] = None
+        self._wave_for: Optional[Path] = None
+        self._wave_cancel = threading.Event()
         self._last_seek = 0.0
         self._compact = False
         self._tiny = False
@@ -171,6 +178,11 @@ class Workspace(QWidget):
         head.addWidget(self.sel_label, 1)
         for b in (self.btn_prev_clip, self.btn_dup, self.btn_delete):
             head.addWidget(b)
+        self.btn_preview_dl = QPushButton(theme.icon("download", size=16), "Download preview")
+        self.btn_preview_dl.setToolTip("Download a small low-quality copy of the video (max 480p). It lets you play the "
+                                       "video here and shows thumbnails on the timeline. Progress is in the Downloads panel.")
+        self.btn_preview_dl.setVisible(False)
+        head.addWidget(self.btn_preview_dl)
         self.timeline.move_controls_to(head)
         tl.addLayout(head)
         tl.addWidget(self.timeline, 1)
@@ -297,6 +309,7 @@ class Workspace(QWidget):
         self._scroll.setFrameShape(QScrollArea.NoFrame)
         self._scroll.setWidget(holder)
         outer.addWidget(self._scroll, 1)
+        wheel_guard.install(self)                    # scrolling the side panel must not change format/quality/crop boxes
 
     def _export_panel(self) -> QWidget:
         box = QWidget()
@@ -335,10 +348,12 @@ class Workspace(QWidget):
         g.addWidget(key("Codec"), 2, 1)
         g.addWidget(self.trim, 3, 0)
         g.addWidget(self.codec, 3, 1)
-        g.addWidget(key("Save to"), 4, 0, 1, 2)
-        g.addWidget(self.out_dir, 5, 0)
-        g.addWidget(self.btn_out, 5, 1)
-        g.addWidget(self.est_label, 6, 0, 1, 2)
+        # the output folder is chosen in Settings; the (hidden) field only carries the value to the export code
+        self.out_dir.setParent(box)
+        self.btn_out.setParent(box)
+        self.out_dir.hide()
+        self.btn_out.hide()
+        g.addWidget(self.est_label, 4, 0, 1, 2)
         g.setColumnStretch(0, 1)
         g.setColumnStretch(1, 1)
         g.setVerticalSpacing(4)
@@ -409,6 +424,7 @@ class Workspace(QWidget):
             b.setText("" if tiny else t)
             b.setToolTip(t)
         self.preview.btn_clip.setText("" if tiny else "Preview clip")
+        self._set_enabled_state()
         self.preview.goto.setVisible(not tiny)
 
     def _wire(self) -> None:
@@ -439,6 +455,7 @@ class Workspace(QWidget):
 
         self.preview.positionChanged.connect(self._on_play_position)
         self.preview.downloadPreviewRequested.connect(self.request_preview_download)
+        self.btn_preview_dl.clicked.connect(self.request_preview_download)
         self.crop_controls.cropChanged.connect(self._crop_from_controls)
         self.crop_controls.applyToAll.connect(self._crop_apply_all)
         self.preview.overlay.cropChanged.connect(self._crop_from_overlay)
@@ -449,9 +466,8 @@ class Workspace(QWidget):
         self.btn_sel.clicked.connect(lambda: self.export_clips(selected_only=True))
         self.btn_all.clicked.connect(lambda: self.export_clips(selected_only=False))
         self.btn_full.clicked.connect(lambda: self.export_clips(selected_only=False, full=True))
-        self.tsignals.preview_ready.connect(self._on_preview_ready)
-        self.tsignals.preview_progress.connect(self._on_preview_progress)
         self.tsignals.thumbnail.connect(self._on_thumbnail)
+        self.tsignals.waveform.connect(self._on_waveform)
 
     def _if_not_typing(self, fn) -> None:
         from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QLineEdit as LE, QTableWidget
@@ -479,9 +495,11 @@ class Workspace(QWidget):
         for b, n in ((self.btn_paste, "paste"), (self.btn_clear, "cancel"), (self.btn_add, "add"),
                      (self.btn_delete, "delete"), (self.btn_dup, "duplicate"), (self.btn_reset, "reset"),
                      (self.btn_prev_clip, "play_range"), (self.btn_sel, "download"), (self.btn_full, "download"),
-                     (self.btn_out, "folder")):
+                     (self.btn_out, "folder"), (self.btn_preview_dl, "download")):
             b.setIcon(theme.icon(n, size=16))
         self.btn_all.setIcon(theme.icon("download", size=18, color="#04121a"))
+        for sec in (self.sec_info, self.sec_output, self.sec_crop):
+            sec.refresh_icons()
         self.timeline.refresh_icons()
         self.clip_list.refresh_icons()
         self.preview.refresh_icons()
@@ -500,12 +518,28 @@ class Workspace(QWidget):
             b.setEnabled(loaded and sel)
         self.btn_sel.setEnabled(loaded and sel)
         n_sel = len(self.selected_ids())
-        self.btn_sel.setText(f"Selected ({n_sel})" if n_sel > 1 else "Selected Clip")
+        mp3 = self.fmt.currentData() == "mp3"
+        what = "Selected MP3" if mp3 else "Selected"
+        self.btn_sel.setText(f"{what} ({n_sel})" if n_sel > 1 else ("Selected MP3" if mp3 else "Selected Clip"))
+        self.btn_all.setText("Download All MP3 Clips" if mp3 else "Download All Clips")
+        self.btn_full.setText("Full MP3" if mp3 else "Full Video")
+        self.btn_full.setToolTip("Export the whole audio as one MP3 file" if mp3 else
+                                 "Export the whole video (no trimming, no crop) with the format and quality chosen above")
+        self.btn_all.setToolTip("Export every clip as its own MP3 file (Ctrl+E)" if mp3 else
+                                "Export every clip as its own file (Ctrl+E)")
+        self.btn_preview_dl.setToolTip(
+            "Download a small low-quality audio copy. It lets you play the audio here and draws its waveform on the "
+            "timeline. Progress is in the Downloads panel." if mp3 else
+            "Download a small low-quality copy of the video (max 480p). It lets you play the video here and shows "
+            "thumbnails on the timeline. Progress is in the Downloads panel.")
+        self.btn_preview_dl.setText("" if getattr(self, "_tiny", False) else ("Download audio preview" if mp3 else "Download preview"))
         self.btn_all.setEnabled(loaded and has_clips)
         self.clip_count.setText(f"{len(self.clips)} clip{'s' if len(self.clips) != 1 else ''}" if loaded else "")
         self.btn_full.setEnabled(loaded)
+        need_media = self.local_media is None or (self._local_audio_only and not mp3)
+        self.btn_preview_dl.setVisible(loaded and need_media and not self._preview_busy)
         mp4 = self.fmt.currentData() == "mp4"
-        self.crop_controls.setEnabled(loaded and sel and mp4)
+        self.crop_controls.setEnabled(loaded and mp4)
         self.codec.setEnabled(mp4)
         self.quality.setEnabled(loaded and mp4)
         self.preview.btn_clip.setEnabled(loaded and sel and self.preview.has_media())
@@ -545,6 +579,8 @@ class Workspace(QWidget):
         if len(self.clips):
             self.clips.apply_output_to_all(self._current_output())
         self._update_estimate()
+        self.timeline.set_wave_mode(self.fmt.currentData() == "mp3")
+        self._ensure_visuals()
         self._set_enabled_state()
 
     def _update_estimate(self) -> None:
@@ -592,8 +628,7 @@ class Workspace(QWidget):
             return
         if self._an_worker:
             self._an_worker.cancel()
-        self._preview_cancel.set()
-        self._preview_busy = False
+        self._cancel_preview_job()
         self._reset_media()
         self.video = None
         self.clips.reset_source("", 0.0)
@@ -764,6 +799,7 @@ class Workspace(QWidget):
         dur = info.duration or 0.0
         self.clips.reset_source(info.id or info.url, dur)
         self.timeline.set_duration(dur)
+        self.timeline.set_wave_mode(self.fmt.currentData() == "mp3")
         self.info_title.setText(info.title)
         self.info_uploader.setText(info.uploader or "-")
         self.info_duration.setText(format_timestamp(dur))
@@ -793,6 +829,12 @@ class Workspace(QWidget):
         self._set_enabled_state()
 
     def _reset_media(self) -> None:
+        self._cancel_preview_job()
+        self._wave_cancel.set()
+        self._wave_cancel = threading.Event()
+        self._wave_for = self._thumbs_for = None
+        self._local_audio_only = False
+        self.timeline.set_peaks([])
         self._thumb_cancel.set()
         self._thumb_cancel = threading.Event()
         self.preview.clear_media()
@@ -802,11 +844,17 @@ class Workspace(QWidget):
 
     # ------------------------------------------------------------ preview download / thumbnails
     def request_preview_download(self) -> None:
+        """Queue a low-resolution copy (max 480p) as a normal job, so its progress shows in the Downloads panel."""
         if not self.video or self._preview_busy:
             return
-        size = self.video.estimate_size(480)
-        msg = ("To show the video and timeline thumbnails, a low-resolution (max 480p) copy of the whole video must be "
-               f"downloaded{f' (about {human_size(size)})' if size else ''}.\n\nDownload it now?")
+        audio = self.fmt.currentData() == "mp3"
+        size = None if audio else self.video.estimate_size(480)
+        if audio:
+            msg = ("To play the audio and draw its waveform on the timeline, a small low-quality audio copy of the whole "
+                   "video must be downloaded.\n\nDownload it now?")
+        else:
+            msg = ("To show the video and timeline thumbnails, a low-resolution (max 480p) copy of the whole video must be "
+                   f"downloaded{f' (about {human_size(size)})' if size else ''}.\n\nDownload it now?")
         if QMessageBox.question(self, "Download preview file", msg) != QMessageBox.Yes:
             return
         try:
@@ -814,40 +862,87 @@ class Workspace(QWidget):
         except FFmpegNotFound:
             self.setupRequested.emit("FFmpeg is required for this and is not installed yet.")
             return
+        selector = AUDIO_PREVIEW_SELECTOR if audio else PREVIEW_SELECTOR
+        key = yd.source_key(self.video.url, selector)
+        spec = SourceSpec(self.video.url, self.video.title, selector, key,
+                          Path(self.settings.temp_dir) / "preview", ffmpeg, "")
+        label = "Audio preview (low quality)" if audio else "Preview (low quality)"
+        job = self.controller.add(DownloadJob(JobKind.SOURCE, f"{self.tag}{label}: {self.video.title}",
+                                              site_name(self.video.url), spec))
+        self._preview_job_id = job.id
         self._preview_busy = True
-        self._preview_cancel = threading.Event()
-        key = yd.source_key(self.video.url, PREVIEW_SELECTOR)
-        self.preview.set_busy("Downloading preview file...")
+        self.preview.set_busy("Downloading audio preview..." if audio else "Downloading preview file...")
         self.busyChanged.emit("Preview...")
-        self.controller.pool.start(PreviewDownloadTask(
-            self.video.url, PREVIEW_SELECTOR, Path(self.settings.temp_dir) / "preview", key, ffmpeg,
-            "", self.tsignals, self._preview_cancel))
+        self._set_enabled_state()
+        self.exportQueued.emit()                           # opens the Downloads panel so the progress is visible
 
-    @Slot(float)
-    def _on_preview_progress(self, pct: float) -> None:
-        if pct >= 0:
-            self.status(f"Downloading preview file... {pct:.0f}%")
-            if self._preview_busy:
-                self.preview.set_busy("Downloading preview file...", pct)
-
-    @Slot(str, str)
-    def _on_preview_ready(self, path: str, error: str) -> None:
+    def _cancel_preview_job(self) -> None:
+        jid, self._preview_job_id = self._preview_job_id, None
         self._preview_busy = False
-        self.preview.set_busy(None)
-        self.busyChanged.emit("")
-        if not self.video:                       # cleared or closed meanwhile
-            return
-        if path:
-            self._use_local_media(Path(path), "Preview file ready.")
-        else:
-            self.preview.show_message(f"Preview file could not be downloaded: {error}", offer_fetch=True)
+        if jid:
+            try:
+                if not self.controller.queue.get(jid).is_finished:
+                    self.controller.cancel(jid)
+            except KeyError:
+                pass
 
-    def _use_local_media(self, path: Path, msg: str) -> None:
+    def _on_preview_job(self, job: DownloadJob) -> None:
+        """Mirror the preview job's state on the preview pane (the media itself is picked up by on_job_changed)."""
+        if job.status == JobStatus.COMPLETED:
+            self._preview_busy = False
+            self.preview.set_busy(None)
+            self.busyChanged.emit("")
+        elif job.status in (JobStatus.FAILED, JobStatus.CANCELED):
+            self._preview_busy = False
+            self.preview.set_busy(None)
+            self.busyChanged.emit("")
+            if self.video and self._preview_job_id == job.id and not self.local_media:
+                why = "canceled" if job.status == JobStatus.CANCELED else (job.error or "").split("\n\nDetails:")[0]
+                self.preview.show_message(f"Preview file could not be downloaded: {why}", offer_fetch=True)
+        elif job.status == JobStatus.WAITING:              # retried from the queue
+            self._preview_busy = True
+            self.preview.set_busy("Downloading preview file...")
+        else:
+            self._preview_busy = True
+            self.preview.set_busy("Downloading preview file...", job.progress)
+            if job.progress is not None:
+                self.status(f"Downloading preview file... {job.progress:.0f}%")
+        self._set_enabled_state()
+
+    def _use_local_media(self, path: Path, msg: str, audio_only: Optional[bool] = None) -> None:
         self.local_media = path
+        self._local_audio_only = (path.suffix.lower() in AUDIO_EXTS) if audio_only is None else audio_only
         self.preview.set_source(str(path), is_file=True)
         self.status(msg, 5000)
-        self._start_thumbnails(path)
+        self._ensure_visuals()
         self._set_enabled_state()
+
+    def _ensure_visuals(self) -> None:
+        """Thumbnails (MP4 mode) or the audio waveform (MP3 mode) from the local file, each computed once per file."""
+        path = self.local_media
+        if not path or not self.video:
+            return
+        if self.fmt.currentData() == "mp3":
+            if self._wave_for != path:
+                self._start_wave(path)
+        elif not self._local_audio_only and self._thumbs_for != path:
+            self._start_thumbnails(path)
+
+    def _start_wave(self, path: Path) -> None:
+        if not self.video or not self.video.duration:
+            return
+        ffmpeg = find_executable("ffmpeg", self.settings.ffmpeg_path)
+        if not ffmpeg:
+            return
+        self._wave_cancel.set()
+        self._wave_cancel = threading.Event()
+        self._wave_for = path
+        self.controller.pool.start(WaveformTask(ffmpeg, path, self.video.duration, self.tsignals, self._wave_cancel))
+
+    @Slot(str, object)
+    def _on_waveform(self, path: str, peaks) -> None:
+        if self.local_media and str(self.local_media) == path:
+            self.timeline.set_peaks(peaks)
 
     def _start_thumbnails(self, path: Path) -> None:
         if not self.video or not self.video.duration:
@@ -857,6 +952,7 @@ class Workspace(QWidget):
             return
         self._thumb_cancel.set()
         self._thumb_cancel = threading.Event()
+        self._thumbs_for = path
         self.timeline.canvas.thumbs.clear()
         out_dir = Path(self.settings.temp_dir) / "thumbs" / yd.source_key(self.video.url, "t")
         self.controller.pool.start(ThumbnailTask(ffmpeg, path, self.video.duration, out_dir,
@@ -964,7 +1060,7 @@ class Workspace(QWidget):
         if not cid:
             self.preview.overlay.load(CropSettings())
             self.crop_controls.set_settings(CropSettings())
-            self.crop_controls.set_info("Select a clip to crop it")
+            self.crop_controls.set_info("Pick a shape to crop - a clip is created for you if needed")
             return
         c = self.clips.get(cid)
         self.preview.overlay.load(c.crop)
@@ -978,16 +1074,34 @@ class Workspace(QWidget):
         ow, oh = output_size(s, w, h)
         self.crop_controls.set_info(f"Output framing: {ow} x {oh} px (of {w} x {h} source)")
 
-    def _crop_from_controls(self, s: CropSettings) -> None:
+    def _clip_for_crop(self) -> Optional[str]:
+        """The clip a crop change applies to: the selected one, else the first, else a new clip at the playhead."""
         cid = self.selected_id()
+        if cid:
+            return cid
+        if not self.video:
+            return None
+        if len(self.clips) == 0:
+            self.add_clip_at(self.timeline.canvas.playhead)
+        elif self.clips.clips:
+            cid = self.clips.clips[0].id
+            self.timeline.select(cid)
+            self.clip_list.select(cid)
+        return self.selected_id()
+
+    def _crop_from_controls(self, s: CropSettings) -> None:
+        had = self.selected_id() is not None
+        cid = self._clip_for_crop()
         if not cid:
             return
+        if not had:                                    # selecting a clip reloaded the controls: put the user's choice back
+            self.crop_controls.set_settings(s)
         self.preview.overlay.load(s)
         self.clips.set_crop(cid, s)
         self._crop_info(s)
 
     def _crop_from_overlay(self, s: CropSettings) -> None:
-        cid = self.selected_id()
+        cid = self._clip_for_crop()
         if not cid:
             return
         self.crop_controls.set_settings(s)
@@ -995,7 +1109,7 @@ class Workspace(QWidget):
         self._crop_info(s)
 
     def _crop_apply_all(self) -> None:
-        cid = self.selected_id()
+        cid = self._clip_for_crop()
         if cid:
             self.clips.apply_crop_to_all(self.clips.get(cid).crop)
             self.status("Crop applied to all clips", 4000)
@@ -1034,7 +1148,10 @@ class Workspace(QWidget):
             except ClipError as exc:
                 QMessageBox.warning(self, "Invalid clip", f"{c.name}: {exc}")
                 return
-        out_dir = Path(self.out_dir.text().strip() or self.settings.download_dir)
+        if self.fmt.currentData() == "mp3":                 # audio goes to its own folder (Settings > Audio folder)
+            out_dir = Path(self.settings.audio_dir)
+        else:
+            out_dir = Path(self.out_dir.text().strip() or self.settings.download_dir)
         try:
             out_dir.mkdir(parents=True, exist_ok=True)
             test = out_dir / ".uvs_write_test"
@@ -1105,6 +1222,8 @@ class Workspace(QWidget):
         return bool(self.video and getattr(job.payload, "url", None) == self.video.url)
 
     def on_job_changed(self, job: DownloadJob) -> None:
+        if job.id == self._preview_job_id:
+            self._on_preview_job(job)
         if not self.owns_job(job):
             return
         if job.clip_id:
@@ -1113,9 +1232,10 @@ class Workspace(QWidget):
             if job.progress is not None and job.is_active:
                 label += f" {job.progress:.0f}%"
             self.clip_list.set_status(job.clip_id, label)
-        if job.kind == JobKind.SOURCE and job.status == JobStatus.COMPLETED and job.output_path \
-                and not self.local_media and self.video:
-            self._use_local_media(Path(job.output_path), "Source downloaded - preview and thumbnails use it.")
+        if job.kind == JobKind.SOURCE and job.status == JobStatus.COMPLETED and job.output_path and self.video \
+                and (not self.local_media or job.id == self._preview_job_id):
+            self._use_local_media(Path(job.output_path), "Source downloaded - preview and thumbnails use it.",
+                                  audio_only=True if getattr(job.payload, "selector", "") == AUDIO_PREVIEW_SELECTOR else None)
         if job.status == JobStatus.FAILED and job.error:
             hint = ss.classify(job.error)
             url = getattr(job.payload, "url", "") or (self.video.url if self.video else "")
@@ -1141,7 +1261,6 @@ class Workspace(QWidget):
 
     def shutdown(self) -> None:
         self._thumb_cancel.set()
-        self._preview_cancel.set()
         if self._an_worker:
             self._an_worker.cancel()
         if self._an_thread:
