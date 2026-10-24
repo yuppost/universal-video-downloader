@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import threading
 from pathlib import Path
@@ -152,6 +153,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Update", f"The update could not be started: {exc}")
             return
         self.close()                                   # saves settings; the helper restarts the app with the new files
+        QApplication.instance().quit()
+        QTimer.singleShot(6000, lambda: os._exit(0))   # never linger: a still-running old process would block the update
 
     def _restore_geometry(self, saved: str) -> None:
         """Restore the saved window size; a missing or unreadable value (older versions) is simply ignored."""
@@ -497,7 +500,6 @@ class MainWindow(QMainWindow):
         dlg = SettingsDialog(self.settings, self)
         dlg.clearCacheRequested.connect(self._clear_cache)
         dlg.cookiesRequested.connect(self.open_cookie_manager)
-        dlg.updateRequested.connect(self._on_settings_update_requested)
         if dlg.exec() == QDialog.Accepted:
             self.settings = dlg.result_settings()
             save_settings(self.settings)
@@ -511,6 +513,9 @@ class MainWindow(QMainWindow):
             QApplication.instance().setWindowIcon(ic)
             self.setWindowIcon(ic)
             self.statusBar().showMessage("Settings saved", 4000)
+            if dlg.pending_update is not None:                   # "Update" for the app was chosen in the Updates box
+                info = dlg.pending_update
+                QTimer.singleShot(0, lambda: self._on_settings_update_requested(info))
 
     def _on_settings_update_requested(self, info) -> None:
         self._on_app_update(info)              # also shows the status-bar button
@@ -536,6 +541,7 @@ class MainWindow(QMainWindow):
 
     def open_setup(self) -> None:
         dlg = DependencyDialog(self.settings.ffmpeg_path, self, self.settings.hw_encoder)
+        dlg.updateRequested.connect(lambda info: QTimer.singleShot(0, lambda: self._on_settings_update_requested(info)))
         dlg.exec()
         st = deps.check(self.settings.ffmpeg_path)
         if not st.youtube_ok and not self.settings.setup_prompt_dismissed:

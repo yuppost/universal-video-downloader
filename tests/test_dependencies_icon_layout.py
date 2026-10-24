@@ -140,11 +140,14 @@ def test_status_when_nothing_found(monkeypatch):
 
 
 def test_non_windows_gives_manual_hint(monkeypatch):
-    if os.name == "nt":
-        pytest.skip("Windows")
+    monkeypatch.setattr(deps.platform, "machine", lambda: "riscv64")      # a CPU with no automatic download
+    monkeypatch.setattr(deps.os, "name", "posix")
     with pytest.raises(FriendlyError) as ei:
         deps.install_ffmpeg(lambda *a: None, threading.Event())
     assert "package manager" in ei.value.message
+    with pytest.raises(FriendlyError) as ei:
+        deps.install_deno(lambda *a: None, threading.Event())
+    assert "Node.js" in ei.value.message
 
 
 @pytest.mark.skipif(os.name == "nt", reason="uses a fake shell-script 'deno'")
@@ -243,3 +246,119 @@ def test_nothing_is_lost_when_small(window, qapp):
 def test_window_never_larger_than_screen(window, qapp):
     scr = window.screen().availableGeometry()
     assert window.width() <= scr.width() and window.height() <= scr.height()
+
+
+# ---- "Update" downloads only when something newer exists ------------------------
+def test_version_tuple_parsing():
+    assert deps.version_tuple("ffmpeg version 9.0.2-essentials_build-www.gyan.dev") == (9, 0, 2)
+    assert deps.version_tuple("v2.9.8") == (2, 9, 8) and deps.version_tuple("nothing") is None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uses a fake shell-script 'ffmpeg'")
+def test_update_ffmpeg_only_downloads_when_newer(server, tmp_path, monkeypatch):
+    www, base = server
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    for n in ("ffmpeg", "ffprobe"):
+        (fake / n).write_text("#!/bin/sh\necho 'ffmpeg version 9.0.2-essentials_build'\n")
+        (fake / n).chmod(0o755)
+    (www / "release-version").write_text("9.0.2\n")
+    make_zip(www / "ffmpeg.zip")
+    sources = [(f"{base}/ffmpeg.zip", None)]
+    calls = []
+    real = deps.install_ffmpeg
+    monkeypatch.setattr(deps, "install_ffmpeg", lambda *a, **k: calls.append(1) or real(*a, **k))
+    kw = dict(configured=str(fake), version_url=f"{base}/release-version", sources=sources, dest_dir=tmp_path / "m", allow_http=True)
+    msg = deps.update_ffmpeg(lambda *a: None, threading.Event(), **kw)
+    assert "up to date" in msg and not calls                                  # same version: nothing downloaded
+    (www / "release-version").write_text("9.1.0\n")
+    msg = deps.update_ffmpeg(lambda *a: None, threading.Event(), **kw)
+    assert "updated to 9.1.0" in msg and calls == [1]                         # newer: downloaded
+    (www / "release-version").write_text("")
+    with pytest.raises(FriendlyError):                                        # cannot tell: no pointless reinstall
+        deps.update_ffmpeg(lambda *a: None, threading.Event(), **kw)
+    assert calls == [1]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uses a fake shell-script 'deno'")
+def test_update_deno_only_downloads_when_newer(server, tmp_path, monkeypatch):
+    www, base = server
+    monkeypatch.setattr(deps.jsruntime, "find_js_runtime", lambda: ("deno", "/x/deno", (2, 9, 8)))
+    (www / "latest.json").write_text('{"tag_name": "v2.9.8"}')
+    calls = []
+    monkeypatch.setattr(deps, "install_deno", lambda *a, **k: calls.append(1))
+    kw = dict(version_url=f"{base}/latest.json", allow_http=True)
+    assert "up to date" in deps.update_deno(lambda *a: None, threading.Event(), **kw) and not calls
+    (www / "latest.json").write_text('{"tag_name": "v2.10.0"}')
+    assert "updated to 2.10.0" in deps.update_deno(lambda *a: None, threading.Event(), **kw) and calls == [1]
+    monkeypatch.setattr(deps.jsruntime, "find_js_runtime", lambda: None)      # nothing installed: plain install
+    assert "installed" in deps.update_deno(lambda *a: None, threading.Event(), **kw) and calls == [1, 1]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uses a fake shell-script 'ffmpeg'")
+def test_check_tool_updates_reports_states_without_downloading(server, tmp_path, monkeypatch):
+    www, base = server
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    for n in ("ffmpeg", "ffprobe"):
+        (fake / n).write_text("#!/bin/sh\necho 'ffmpeg version 9.0.2-essentials_build'\n")
+        (fake / n).chmod(0o755)
+    (www / "release-version").write_text("9.0.2")
+    (www / "latest.json").write_text('{"tag_name": "v3.0.0"}')
+    monkeypatch.setattr(deps.yd, "ytdlp_version", lambda: "2026.10.21")
+    monkeypatch.setattr(deps.yd, "latest_ytdlp_version", lambda *a, **k: "2026.10.21")
+    monkeypatch.setattr(deps.jsruntime, "find_js_runtime", lambda: ("deno", "/x/deno", (2, 9, 8)))
+    calls = []
+    monkeypatch.setattr(deps, "install_ffmpeg", lambda *a, **k: calls.append(1))
+    monkeypatch.setattr(deps, "install_deno", lambda *a, **k: calls.append(1))
+    r = deps.check_tool_updates(str(fake), f"{base}/release-version", f"{base}/latest.json", allow_http=True)
+    assert r["ffmpeg"] == ("uptodate", "9.0.2") and r["ytdlp"][0] == "uptodate" and r["deno"] == ("available", "3.0.0")
+    (www / "release-version").write_text("")
+    assert deps.check_tool_updates(str(fake), f"{base}/release-version", f"{base}/latest.json", allow_http=True)["ffmpeg"][0] == "unknown"
+    monkeypatch.setattr(deps.jsruntime, "find_js_runtime", lambda: None)
+    assert deps.check_tool_updates(str(fake), f"{base}/release-version", f"{base}/latest.json", allow_http=True)["deno"][0] == "missing"
+    assert not calls
+
+
+# ---- Linux static FFmpeg / Deno ---------------------------------------------------------------
+def test_install_ffmpeg_from_tar_xz_with_md5_and_version_from_readme(server, tmp_path):
+    import io
+    import tarfile
+    www, base = server
+    with tarfile.open(www / "ff.tar.xz", "w:xz") as t:
+        for name, mode in (("ffmpeg-7.0.2-amd64-static/ffmpeg", 0o755), ("ffmpeg-7.0.2-amd64-static/ffprobe", 0o755),
+                           ("ffmpeg-7.0.2-amd64-static/manpages/ffmpeg", 0o644)):
+            body = b"#!/bin/sh\necho 'ffmpeg version 7.0.2-static'\n"
+            ti = tarfile.TarInfo(name)
+            ti.size, ti.mode = len(body), mode
+            t.addfile(ti, io.BytesIO(body))
+    md5 = hashlib.md5((www / "ff.tar.xz").read_bytes()).hexdigest()
+    (www / "ff.tar.xz.md5").write_text(f"{md5}  ff.tar.xz\n")
+    dest = tmp_path / "ffmpeg"
+    out = deps.install_ffmpeg(lambda *a: None, threading.Event(), sources=[(f"{base}/ff.tar.xz", f"{base}/ff.tar.xz.md5")],
+                              dest_dir=dest, allow_http=True)
+    assert (out / "ffmpeg").is_file() and (out / "ffprobe").is_file() and os.access(out / "ffmpeg", os.X_OK)
+    assert not (out / "manpages").exists()
+    (www / "ff.tar.xz.md5").write_text("0" * 32 + "  ff.tar.xz\n")                 # wrong checksum is refused
+    with pytest.raises(FriendlyError) as ei:
+        deps.install_ffmpeg(lambda *a: None, threading.Event(), sources=[(f"{base}/ff.tar.xz", f"{base}/ff.tar.xz.md5")],
+                            dest_dir=tmp_path / "f2", allow_http=True)
+    assert "integrity" in ei.value.message
+    (www / "release-readme.txt").write_text("FFmpeg Static Build\n\nversion: 7.1.1\n\nlicense: GPLv3\n")
+    assert deps.latest_ffmpeg_version(f"{base}/release-readme.txt", allow_http=True) == "7.1.1"
+
+
+def test_default_sources_follow_the_platform(monkeypatch):
+    monkeypatch.setattr(deps.os, "name", "posix")
+    monkeypatch.setattr(deps.sys, "platform", "linux")
+    monkeypatch.setattr(deps.platform, "machine", lambda: "x86_64")
+    ff, dn = deps.default_ffmpeg_sources(), deps.default_deno_sources()
+    assert ff[0][0].endswith("ffmpeg-release-amd64-static.tar.xz") and ff[0][1].endswith(".md5")
+    assert dn[0][0].endswith("deno-x86_64-unknown-linux-gnu.zip")
+    monkeypatch.setattr(deps.platform, "machine", lambda: "aarch64")
+    assert deps.default_ffmpeg_sources()[0][0].endswith("arm64-static.tar.xz")
+    assert deps.default_deno_sources()[0][0].endswith("aarch64-unknown-linux-gnu.zip")
+    monkeypatch.setattr(deps.os, "name", "nt")
+    monkeypatch.setattr(deps.sys, "platform", "win32")
+    assert deps.default_ffmpeg_sources()[0][0].endswith("ffmpeg-release-essentials.zip")
+    assert deps.default_deno_sources()[0][0].endswith("windows-msvc.zip")

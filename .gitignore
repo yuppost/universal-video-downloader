@@ -6,5 +6,5 @@ __pycache__/
 ffmpeg/
 deno/
 installer_out/
-LICENSE
-README.md
+UniversalVideoStudio-linux-*.tar.gz
+UniversalVideoStudio-linux-*.deb

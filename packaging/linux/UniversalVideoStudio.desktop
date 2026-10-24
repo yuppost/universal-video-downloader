@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Universal Video Studio
+Comment=Download, trim and crop videos
+Exec=@APPDIR@/UniversalVideoStudio
+Icon=@APPDIR@/icon.png
+Terminal=false
+Categories=AudioVideo;Video;
+StartupWMClass=UniversalVideoStudio

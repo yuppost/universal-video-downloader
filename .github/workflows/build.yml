@@ -1,6 +1,6 @@
-name: Build Windows app
+name: Build apps (Windows + Linux)
 
-# Run it by hand (Actions tab > "Build Windows app" > Run workflow) or push a tag such as v1.1.0 to also publish a Release.
+# Run it by hand (Actions tab > "Build apps" > Run workflow) or push a tag such as v1.1.0 to also publish a Release.
 # FFmpeg and Deno are NOT downloaded or bundled here: the app downloads them (SHA-256 verified) on first launch.
 on:
   workflow_dispatch:
@@ -64,9 +64,60 @@ jobs:
             installer_out/*.exe
           if-no-files-found: error
 
-      - name: Publish Release (tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
+  linux:
+    runs-on: ubuntu-22.04              # older glibc than ubuntu-latest: the app then runs on more distributions
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: System libraries (Qt offscreen tests + PyInstaller)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
+            libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libnss3 libasound2 \
+            libpulse0 libdbus-1-3 ffmpeg
+
+      - name: Build (tests + PyInstaller + archive)
+        timeout-minutes: 20
+        env:
+          CI: "true"
+        run: ./build.sh
+
+      - name: Check the archive
+        run: |
+          ls -la UniversalVideoStudio-linux-*.tar.gz UniversalVideoStudio-linux-*.deb
+          dpkg-deb -I UniversalVideoStudio-linux-*.deb
+          dpkg-deb -c UniversalVideoStudio-linux-*.deb | grep -q "opt/universal-video-studio/UniversalVideoStudio$"
+          tar -tzf UniversalVideoStudio-linux-*.tar.gz | grep -q "UniversalVideoStudio/UniversalVideoStudio$"
+          if tar -tzf UniversalVideoStudio-linux-*.tar.gz | grep -Eq "/(ffmpeg|deno)$"; then echo "FFmpeg/Deno must not be bundled"; exit 1; fi
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: UniversalVideoStudio-linux
+          path: |
+            UniversalVideoStudio-linux-*.tar.gz
+            UniversalVideoStudio-linux-*.deb
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Publish Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" UniversalVideoStudio-windows.zip installer_out/*.exe --title "${{ github.ref_name }}" --generate-notes
+        run: |
+          ls -la out
+          gh release create "${{ github.ref_name }}" out/* --repo "${{ github.repository }}" --title "${{ github.ref_name }}" --generate-notes

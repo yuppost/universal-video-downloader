@@ -10,9 +10,12 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import platform
+import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import threading
 import time
 import urllib.request
@@ -30,13 +33,42 @@ from app.utils.paths import app_data_dir, human_size
 log = logging.getLogger("uvs.deps")
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
-# (zip url, sha256 url or None). Tried in order.
-FFMPEG_SOURCES: List[Tuple[str, Optional[str]]] = [
-    ("https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
-     "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip.sha256"),
-    ("https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
-     "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/checksums.sha256"),
-]
+def _linux_arch() -> str:
+    """Names used by the Linux download sites: ``amd64`` / ``arm64`` ("" = no automatic download for this CPU)."""
+    m = platform.machine().lower()
+    return "amd64" if m in ("x86_64", "amd64") else "arm64" if m in ("aarch64", "arm64") else ""
+
+
+def _deno_target() -> str:
+    m = platform.machine().lower()
+    arch = "x86_64" if m in ("x86_64", "amd64") else "aarch64" if m in ("aarch64", "arm64") else ""
+    if os.name == "nt":
+        return "x86_64-pc-windows-msvc"
+    return f"{arch}-unknown-linux-gnu" if arch and sys.platform.startswith("linux") else ""
+
+
+# (archive url, checksum url or None). Tried in order. Windows: .zip (SHA-256). Linux: static builds (.tar.xz, MD5 file).
+def default_ffmpeg_sources() -> List[Tuple[str, Optional[str]]]:
+    if os.name == "nt":
+        return [
+            ("https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
+             "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip.sha256"),
+            ("https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
+             "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/checksums.sha256"),
+        ]
+    arch = _linux_arch() if sys.platform.startswith("linux") else ""
+    if not arch:
+        return []
+    base = "https://johnvansickle.com/ffmpeg/releases"
+    return [(f"{base}/ffmpeg-release-{arch}-static.tar.xz", f"{base}/ffmpeg-release-{arch}-static.tar.xz.md5")]
+
+
+FFMPEG_SOURCES: List[Tuple[str, Optional[str]]] = default_ffmpeg_sources()
+
+# Where the newest released version number can be read (plain text / JSON, a few bytes).
+FFMPEG_VERSION_URL = ("https://www.gyan.dev/ffmpeg/builds/release-version" if os.name == "nt"
+                      else "https://johnvansickle.com/ffmpeg/release-readme.txt")
+DENO_LATEST_URL = "https://api.github.com/repos/denoland/deno/releases/latest"
 
 # percent (None = unknown), message, bytes/s
 Progress = Callable[[Optional[float], str, Optional[float]], None]
@@ -143,6 +175,61 @@ def _expected_sha256(sha_url: Optional[str], filename: str, cancel: threading.Ev
     return None
 
 
+def _expected_digest(sha_url: Optional[str], filename: str) -> Optional[Tuple[str, str]]:
+    """("sha256"|"md5", hex) from a checksum file; MD5 is accepted for sites that publish nothing stronger."""
+    if not sha_url:
+        return None
+    try:
+        req = urllib.request.Request(sha_url, headers={"User-Agent": "UniversalVideoStudio"})
+        with urllib.request.urlopen(req, timeout=20) as r:  # noqa: S310 - https fixed constants
+            text = r.read(2_000_000).decode("utf-8", "replace")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        parts = line.split()
+        if parts and re.fullmatch(r"[0-9a-fA-F]{32}|[0-9a-fA-F]{64}", parts[0]) \
+                and (len(parts) == 1 or parts[-1].lstrip("*").endswith(filename)):
+            return ("sha256" if len(parts[0]) == 64 else "md5"), parts[0].lower()
+    return None
+
+
+def _file_digest(path: Path, algo: str) -> str:
+    h = hashlib.new(algo)
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _verify_download(path: Path, sha_url: Optional[str], url: str) -> None:
+    want = _expected_digest(sha_url, url.rsplit("/", 1)[-1])
+    if want and _file_digest(path, want[0]) != want[1]:
+        raise FriendlyError("The downloaded file failed its integrity check (checksum mismatch).")
+
+
+def extract_ffmpeg_tar(archive: Path, dest_dir: Path) -> None:
+    """Extract only ffmpeg and ffprobe (from a .tar.xz/.tar.gz of static builds) into *dest_dir*, by basename."""
+    wanted = {"ffmpeg", "ffprobe"}
+    found = set()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(archive, "r:*") as t:
+        for m in t:
+            name = Path(m.name)
+            if not m.isfile() or name.name not in wanted or name.name in found or name.is_absolute() or ".." in name.parts:
+                continue
+            src = t.extractfile(m)
+            if src is None:
+                continue
+            target = dest_dir / name.name
+            with src, open(str(target) + ".new", "wb") as out:
+                shutil.copyfileobj(src, out)
+            os.replace(str(target) + ".new", target)
+            target.chmod(0o755)
+            found.add(name.name)
+    if found != wanted:
+        raise FriendlyError("The downloaded archive did not contain ffmpeg and ffprobe.")
+
+
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -178,24 +265,27 @@ def install_ffmpeg(progress: Progress, cancel: threading.Event,
                    sources: Optional[List[Tuple[str, Optional[str]]]] = None,
                    dest_dir: Optional[Path] = None, allow_http: bool = False) -> Path:
     """Download and unpack FFmpeg. Returns the folder containing the executables."""
-    if os.name != "nt" and sources is None:
-        raise FriendlyError("Automatic FFmpeg download is only available on Windows. "
+    sources = sources if sources is not None else default_ffmpeg_sources()
+    if not sources:
+        raise FriendlyError("Automatic FFmpeg download is not available for this system. "
                             "Install it with your package manager (for example: sudo apt install ffmpeg).")
     dest_dir = dest_dir or managed_ffmpeg_dir()
     tmp_dir = dest_dir.parent / "download"
     shutil.rmtree(tmp_dir, ignore_errors=True)
     last_error: Optional[FriendlyError] = None
-    for url, sha_url in sources or FFMPEG_SOURCES:
-        zpath = tmp_dir / "ffmpeg.zip"
+    for url, sha_url in sources:
+        is_tar = url.lower().endswith((".tar.xz", ".tar.gz", ".tgz"))
+        zpath = tmp_dir / ("ffmpeg.tar.xz" if is_tar else "ffmpeg.zip")
         try:
             progress(None, "Connecting...", None)
             download_file(url, zpath, progress, cancel, allow_http, "Downloading FFmpeg")
             progress(None, "Verifying download...", None)
-            want = _expected_sha256(sha_url, url.rsplit("/", 1)[-1], cancel)
-            if want and _sha256(zpath) != want:
-                raise FriendlyError("The downloaded file failed its integrity check (SHA-256 mismatch).")
+            _verify_download(zpath, sha_url, url)
             progress(None, "Unpacking...", None)
-            extract_ffmpeg(zpath, dest_dir)
+            if is_tar:
+                extract_ffmpeg_tar(zpath, dest_dir)
+            else:
+                extract_ffmpeg(zpath, dest_dir)
             exe = dest_dir / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
             try:
                 res = subprocess.run([str(exe), "-version"], capture_output=True, timeout=30, creationflags=_NO_WINDOW)
@@ -209,7 +299,7 @@ def install_ffmpeg(progress: Progress, cancel: threading.Event,
         except FriendlyError as exc:
             log.warning("FFmpeg source failed: %s", exc.message)
             last_error = exc
-        except zipfile.BadZipFile:
+        except (zipfile.BadZipFile, tarfile.TarError, EOFError):
             last_error = FriendlyError("The downloaded file is not a valid archive.")
         finally:
             zpath.unlink(missing_ok=True)
@@ -217,31 +307,35 @@ def install_ffmpeg(progress: Progress, cancel: threading.Event,
     raise last_error or FriendlyError("FFmpeg could not be downloaded.")
 
 
-DENO_SOURCES: List[Tuple[str, Optional[str]]] = [
-    ("https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip",
-     "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip.sha256sum"),
-]
+def default_deno_sources() -> List[Tuple[str, Optional[str]]]:
+    target = _deno_target()
+    if not target:
+        return []
+    base = "https://github.com/denoland/deno/releases/latest/download"
+    return [(f"{base}/deno-{target}.zip", f"{base}/deno-{target}.zip.sha256sum")]
+
+
+DENO_SOURCES: List[Tuple[str, Optional[str]]] = default_deno_sources()
 
 
 def install_deno(progress: Progress, cancel: threading.Event,
                  sources: Optional[List[Tuple[str, Optional[str]]]] = None,
                  dest_dir: Optional[Path] = None, allow_http: bool = False) -> Path:
     """Download Deno (single executable) for YouTube's JavaScript challenges into tools/deno."""
-    if os.name != "nt" and sources is None:
-        raise FriendlyError("Automatic Deno download is only available on Windows. Install Deno or Node.js 22+ yourself.")
+    sources = sources if sources is not None else default_deno_sources()
+    if not sources:
+        raise FriendlyError("Automatic Deno download is not available for this system. Install Deno or Node.js 22+ yourself.")
     dest_dir = dest_dir or jsruntime.managed_deno_dir()
     tmp_dir = dest_dir.parent / "download_deno"
     shutil.rmtree(tmp_dir, ignore_errors=True)
     last: Optional[FriendlyError] = None
-    for url, sha_url in sources or DENO_SOURCES:
+    for url, sha_url in sources:
         zpath = tmp_dir / "deno.zip"
         try:
             progress(None, "Connecting...", None)
             download_file(url, zpath, progress, cancel, allow_http, "Downloading Deno")
             progress(None, "Verifying download...", None)
-            want = _expected_sha256(sha_url, url.rsplit("/", 1)[-1], cancel)
-            if want and _sha256(zpath) != want:
-                raise FriendlyError("The downloaded file failed its integrity check (SHA-256 mismatch).")
+            _verify_download(zpath, sha_url, url)
             progress(None, "Unpacking...", None)
             exe_name = "deno.exe" if os.name == "nt" else "deno"
             dest_dir.mkdir(parents=True, exist_ok=True)
@@ -286,3 +380,128 @@ def install_ytdlp(progress: Progress) -> str:
     importlib.invalidate_caches()
     progress(100.0, "yt-dlp installed", None)
     return msg
+
+
+# ---------------------------------------------------------------------------
+# "Update" = check first, download only when a newer version exists
+# ---------------------------------------------------------------------------
+def version_tuple(text: str) -> Optional[Tuple[int, ...]]:
+    """First dotted number in *text* ("ffmpeg version 9.0.2-essentials..." / "v2.9.8" -> (9,0,2) / (2,9,8))."""
+    import re
+    m = re.search(r"(\d+(?:\.\d+)+)", text or "")
+    return tuple(int(x) for x in m.group(1).split(".")) if m else None
+
+
+def _fetch_text(url: str, timeout: float = 10, allow_http: bool = False) -> Optional[str]:
+    if not (url.startswith("https://") or (allow_http and url.startswith("http://"))):
+        return None
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "UniversalVideoStudio", "Accept": "application/json, text/plain"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310 - https constants / tests use http
+            return r.read(500_000).decode("utf-8", "replace")
+    except (OSError, ValueError):
+        return None
+
+
+def latest_ffmpeg_version(url: str = FFMPEG_VERSION_URL, allow_http: bool = False) -> Optional[str]:
+    """Newest release number: gyan.dev's one-line file (Windows) or ``version: x.y.z`` in the Linux builds' readme."""
+    text = _fetch_text(url, allow_http=allow_http)
+    if not text or not text.strip():
+        return None
+    m = re.search(r"^\s*version:\s*(\d+(?:\.\d+)+)", text, re.M | re.I)
+    return m.group(1) if m else text.strip().splitlines()[0]
+
+
+def latest_deno_version(url: str = DENO_LATEST_URL, allow_http: bool = False) -> Optional[str]:
+    import json
+    text = _fetch_text(url, allow_http=allow_http)
+    try:
+        return str(json.loads(text)["tag_name"]).lstrip("v") if text else None
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def _fmt(v: Optional[Tuple[int, ...]]) -> str:
+    return ".".join(map(str, v)) if v else "unknown"
+
+
+def update_ffmpeg(progress: Progress, cancel: threading.Event, configured: str = "", version_url: str = FFMPEG_VERSION_URL,
+                  sources: Optional[List[Tuple[str, Optional[str]]]] = None, dest_dir: Optional[Path] = None,
+                  allow_http: bool = False) -> str:
+    """Install FFmpeg when it is missing; otherwise download only if a newer release exists. Returns a message."""
+    exe = find_executable("ffmpeg", configured)
+    if exe is None:
+        install_ffmpeg(progress, cancel, sources, dest_dir, allow_http)
+        return "FFmpeg was installed."
+    progress(None, "Checking for a newer FFmpeg...", None)
+    cur = version_tuple(ffmpeg_version(exe))
+    latest_text = latest_ffmpeg_version(version_url, allow_http)
+    latest = version_tuple(latest_text or "")
+    if latest is None:
+        raise FriendlyError("Could not check for a newer FFmpeg. Check your internet connection and try again.")
+    if cur is not None and latest <= cur:
+        return f"FFmpeg is up to date ({_fmt(cur)})."
+    install_ffmpeg(progress, cancel, sources, dest_dir, allow_http)
+    return f"FFmpeg was updated to {_fmt(latest)}."
+
+
+def update_deno(progress: Progress, cancel: threading.Event, version_url: str = DENO_LATEST_URL,
+                sources: Optional[List[Tuple[str, Optional[str]]]] = None, dest_dir: Optional[Path] = None,
+                allow_http: bool = False) -> str:
+    """Install Deno when no JavaScript runtime exists; otherwise download only if a newer release exists."""
+    found = jsruntime.find_js_runtime()
+    if found is None or found[0] != "deno":
+        install_deno(progress, cancel, sources, dest_dir, allow_http)
+        return "Deno was installed."
+    progress(None, "Checking for a newer Deno...", None)
+    latest = version_tuple(latest_deno_version(version_url, allow_http) or "")
+    if latest is None:
+        raise FriendlyError("Could not check for a newer Deno. Check your internet connection and try again.")
+    if latest <= found[2]:
+        return f"Deno is up to date ({_fmt(found[2])})."
+    install_deno(progress, cancel, sources, dest_dir, allow_http)
+    return f"Deno was updated to {_fmt(latest)}."
+
+
+def check_ffmpeg_update(configured: str = "", url: str = FFMPEG_VERSION_URL, allow_http: bool = False) -> Tuple[str, str]:
+    ff = find_executable("ffmpeg", configured)
+    if not ff:
+        return "missing", ""
+    cur, lt = version_tuple(ffmpeg_version(ff)), version_tuple(latest_ffmpeg_version(url, allow_http) or "")
+    if lt is None:
+        return "unknown", ""
+    return ("available" if cur is None or lt > cur else "uptodate"), _fmt(lt)
+
+
+def check_ytdlp_update() -> Tuple[str, str]:
+    ver = yd.ytdlp_version()
+    if ver == "not installed":
+        return "missing", ""
+    latest = yd.latest_ytdlp_version()
+    lt, cur = version_tuple(latest or ""), version_tuple(ver)
+    if lt is None:
+        return "unknown", ""
+    return ("available" if cur is None or lt > cur else "uptodate"), str(latest)
+
+
+def check_deno_update(url: str = DENO_LATEST_URL, allow_http: bool = False) -> Tuple[str, str]:
+    found = jsruntime.find_js_runtime()
+    if found is None:
+        return "missing", ""
+    if found[0] != "deno":                                 # Node is used: Deno is optional, offer it as an update
+        return "available", ""
+    lt = version_tuple(latest_deno_version(url, allow_http) or "")
+    if lt is None:
+        return "unknown", ""
+    return ("available" if lt > found[2] else "uptodate"), _fmt(lt)
+
+
+def check_tool_updates(configured: str = "", ffmpeg_url: str = FFMPEG_VERSION_URL, deno_url: str = DENO_LATEST_URL,
+                       allow_http: bool = False) -> dict:
+    """Compare installed and newest versions without downloading anything.
+
+    Returns ``{"ffmpeg"|"ytdlp"|"deno": (state, newest)}`` where state is ``missing``, ``uptodate``, ``available`` or
+    ``unknown`` (newest version could not be read - offline).
+    """
+    return {"ffmpeg": check_ffmpeg_update(configured, ffmpeg_url, allow_http), "ytdlp": check_ytdlp_update(),
+            "deno": check_deno_update(deno_url, allow_http)}

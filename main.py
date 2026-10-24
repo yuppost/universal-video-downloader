@@ -48,13 +48,18 @@ def main() -> int:
     from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
     from PySide6.QtWidgets import QApplication, QSplashScreen
 
-    try:
-        import pyi_splash                    # exists only in the packaged app: the exe bootloader already shows a splash
-    except ImportError:
-        pyi_splash = None
+    import os
+    pyi_splash = None
+    if os.environ.get("_PYI_SPLASH_IPC"):    # set by the exe bootloader only when it really shows a splash (--splash)
+        try:
+            import pyi_splash
+        except Exception:                    # noqa: BLE001 - a splash problem must never stop the app
+            pyi_splash = None
     app = QApplication(sys.argv)
     from app import APP_NAME, appicon
     app.setApplicationName(APP_NAME)
+    if sys.platform.startswith("linux"):
+        app.setDesktopFileName("UniversalVideoStudio")      # matches the .desktop file: right icon/name in the dock
     app.setOrganizationName("UniversalVideoStudio")
     # Show something at once: loading the rest (Qt multimedia, yt-dlp, ...) takes a few seconds on Windows.
     pm = QPixmap(420, 190)
