@@ -20,14 +20,9 @@ from app.utils import wheel_guard
 from app.utils.paths import dir_size, human_size
 
 
-class _UpdateBridge(QObject):
-    result = Signal(str, object)         # status, UpdateInfo | None
-
-
 class SettingsDialog(QDialog):
     clearCacheRequested = Signal()
     cookiesRequested = Signal()
-    updateRequested = Signal(object)         # an UpdateInfo: the user wants to see / install it
 
     def __init__(self, settings: Settings, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -35,9 +30,7 @@ class SettingsDialog(QDialog):
         self.setMinimumWidth(360)
         self.resize(680, 720)
         self.s = settings
-        self._bridge = _UpdateBridge()
-        self._bridge.result.connect(self._update_checked)
-        self._found = None
+        self.pending_update = None                 # set when the user chose "Update" for the app inside the Updates box
 
         self.download_dir = self._path_row(settings.download_dir, folder=True)
         self.audio_dir = self._path_row(settings.audio_dir, folder=True)
@@ -89,8 +82,6 @@ class SettingsDialog(QDialog):
         self.browser.setToolTip("Advanced: for sites you have NOT signed in to in the app, let yt-dlp read the cookies "
                                 "from this browser while downloading. Saved sign-ins always win.")
         self.check_app = QCheckBox("Tell me when a new version of this app is available")
-        self.btn_setup = QPushButton("Setup: install / check FFmpeg and yt-dlp...")
-        self.btn_setup.clicked.connect(self._open_setup)
 
         form = QFormLayout()
         form.addRow("Video folder (downloads)", self.download_dir[1])
@@ -104,7 +95,6 @@ class SettingsDialog(QDialog):
         form.addRow("Filename template", self.template)
         form.addRow("Max simultaneous tasks", self.concurrent)
         form.addRow("Theme", self.theme)
-        form.addRow("", self.btn_setup)
         form.addRow("Cache video folder (preview/temp)", self.temp_dir[1])
         form.addRow("Cleanup", self.cleanup)
         form.addRow("", self.keep_inter)
@@ -126,18 +116,15 @@ class SettingsDialog(QDialog):
         self.about = QLabel(f"<b>{APP_NAME}</b> version <b>{__version__}</b> &nbsp;·&nbsp; yt-dlp {yd.ytdlp_version()}")
         self.about.setTextFormat(Qt.RichText)
         form.addRow("About", self.about)
-        self.btn_check = QPushButton("Check for updates")
-        self.btn_check.clicked.connect(self._check_updates)
-        self.btn_view = QPushButton("Update now...")
-        self.btn_view.setObjectName("primary")
-        self.btn_view.hide()
-        self.btn_view.clicked.connect(lambda: self._found and self.updateRequested.emit(self._found))
+        self.btn_update = QPushButton("Update")
+        self.btn_update.setToolTip("See whether the app, FFmpeg, yt-dlp and the YouTube helper are up to date, "
+                                   "and update them")
+        self.btn_update.clicked.connect(self._open_setup)
         self.check_result = QLabel("")
         self.check_result.setObjectName("muted")
         self.check_result.setWordWrap(True)
         urow = QHBoxLayout()
-        urow.addWidget(self.btn_check)
-        urow.addWidget(self.btn_view)
+        urow.addWidget(self.btn_update)
         urow.addWidget(self.check_result, 1)
         form.addRow("Updates", urow)
 
@@ -167,8 +154,15 @@ class SettingsDialog(QDialog):
 
     def _open_setup(self) -> None:
         from app.widgets.dependency_dialog import DependencyDialog
-        DependencyDialog(self.ffmpeg[0].text().strip(), self, self.hw.currentData()).exec()
+        dlg = DependencyDialog(self.ffmpeg[0].text().strip(), self, self.hw.currentData())
+        dlg.updateRequested.connect(self._app_update_chosen)
+        dlg.exec()
         self.about.setText(f"<b>{APP_NAME}</b> version <b>{__version__}</b> &nbsp;·&nbsp; yt-dlp {yd.ytdlp_version()}")
+
+    def _app_update_chosen(self, info) -> None:
+        """Close Settings too (keeping the edits) so no dialog is left open while the app restarts."""
+        self.pending_update = info
+        self.accept()
 
     def _path_row(self, value: str, folder: bool, title: str = "Locate ffmpeg executable", filt: str = ""):
         edit = QLineEdit(value)
@@ -227,31 +221,6 @@ class SettingsDialog(QDialog):
                                 "Exported clips are never touched.") == QMessageBox.Yes:
             self.clearCacheRequested.emit()
             self.cache_label.setText(f"Cache in use: {human_size(dir_size(self.s.cache_dir))}")
-
-    def _check_updates(self) -> None:
-        self.btn_check.setEnabled(False)
-        self.btn_check.setText("Checking...")
-        self.btn_view.hide()
-        self.check_result.setText("")
-
-        def work() -> None:
-            from app.services.update_service import check_update
-            self._bridge.result.emit(*check_update(UPDATE_INFO_URL, __version__))
-        threading.Thread(target=work, daemon=True).start()
-
-    def _update_checked(self, status: str, info) -> None:
-        self.btn_check.setEnabled(True)
-        self.btn_check.setText("Check for updates")
-        self._found = info if status == "available" else None
-        if status == "available":
-            self.check_result.setText(f"Version {info.version} is available (you have {__version__}).")
-            self.btn_view.show()
-        elif status == "latest":
-            self.check_result.setText(f"You have the latest version ({__version__}).")
-        elif status == "unconfigured":
-            self.check_result.setText("No update source is configured in this build.")
-        else:
-            self.check_result.setText("Could not check for updates. Check your internet connection and try again.")
 
     def result_settings(self) -> Settings:
         s = self.s

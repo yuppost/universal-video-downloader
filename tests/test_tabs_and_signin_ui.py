@@ -358,18 +358,18 @@ def test_setup_dialog_explains_the_chosen_encoder(qapp, monkeypatch):
     class St:
         ffmpeg_ok, ffmpeg_path = True, "ff"
     monkeypatch.setattr(fs, "probe_gpu", lambda _f: fs.GpuInfo(True, True, "NVIDIA GeForce RTX 3060"))
-    d = DependencyDialog("", None, "auto")
+    d = DependencyDialog("", None, "auto", check_on_open=False)
     t = d._encoder_text(St)
     assert "RTX 3060" in t and "will use your GPU" in t and "Auto" in t
-    assert "GPU (NVENC)" in DependencyDialog("", None, "nvenc")._encoder_text(St)
+    assert "GPU (NVENC)" in DependencyDialog("", None, "nvenc", check_on_open=False)._encoder_text(St)
     monkeypatch.setattr(fs, "probe_gpu", lambda _f: (_ for _ in ()).throw(AssertionError("must not probe in CPU mode")))
-    cpu = DependencyDialog("", None, "cpu")._encoder_text(St)
+    cpu = DependencyDialog("", None, "cpu", check_on_open=False)._encoder_text(St)
     assert "CPU rendering is selected" in cpu and "GPU is not used" in cpu
     monkeypatch.setattr(fs, "probe_gpu", lambda _f: fs.GpuInfo(False, False))
-    assert "Rendering will use the CPU" in DependencyDialog("", None, "auto")._encoder_text(St)
-    assert "cannot be used" in DependencyDialog("", None, "nvenc")._encoder_text(St)
+    assert "Rendering will use the CPU" in DependencyDialog("", None, "auto", check_on_open=False)._encoder_text(St)
+    assert "cannot be used" in DependencyDialog("", None, "nvenc", check_on_open=False)._encoder_text(St)
     St.ffmpeg_ok = False
-    assert "after FFmpeg is installed" in DependencyDialog("", None, "auto")._encoder_text(St)
+    assert "after FFmpeg is installed" in DependencyDialog("", None, "auto", check_on_open=False)._encoder_text(St)
 
 
 def test_update_button_appears_when_new_version_found(qapp, tmp_path, monkeypatch):
@@ -395,25 +395,49 @@ def test_update_dialog_runs_and_reports_failure(qapp, tmp_path, monkeypatch):
     assert dlg.btn.text() == "Close" and "Nothing was changed" in dlg.status.text() and dlg.new_dir is None
 
 
-def test_settings_shows_version_update_check_and_no_icon_or_ytdlp_row(qapp, tmp_path, monkeypatch):
+def test_settings_has_one_update_button_that_opens_the_updates_box(qapp, tmp_path, monkeypatch):
     monkeypatch.setenv("UVS_DATA_DIR", str(tmp_path))
     from app import __version__
     from app.config import Settings
     from app.services.update_service import UpdateInfo
+    from app.widgets import dependency_dialog as dd
     from app.widgets.settings_dialog import SettingsDialog
     dlg = SettingsDialog(Settings())
     assert __version__ in dlg.about.text()
-    assert not hasattr(dlg, "icon_row") and not hasattr(dlg, "btn_update") and not hasattr(dlg, "yt_label")
+    assert not hasattr(dlg, "icon_row") and not hasattr(dlg, "yt_label")
+    assert not hasattr(dlg, "btn_check") and not hasattr(dlg, "btn_setup") and not hasattr(dlg, "btn_view")
+    assert dlg.btn_update.text() == "Update"
+
+    # the box lists the app and the tools, each with a clear "up to date / update available" line
+    box = dd.DependencyDialog("", None, "auto", check_on_open=False)
+    assert set(box.rows) == {"app", "ffmpeg", "ytdlp", "deno", "gpu"}
+    box._on_checked({"ffmpeg": ("uptodate", "9.0.2"), "ytdlp": ("available", "2099.1.1"), "deno": ("unknown", "")},
+                    "latest", None)
+    assert "Up to date" in box.badges["ffmpeg"].text() and "Up to date" in box.badges["app"].text()
+    assert "Update available: 2099.1.1" in box.badges["ytdlp"].text()
+    assert "Could not check" in box.badges["deno"].text()
+    assert box.rows["ytdlp"][1].objectName() == "primary" and box.rows["ffmpeg"][1].objectName() == ""
+    # a newer app version: Update closes the box and hands the info on
     got = []
-    dlg.updateRequested.connect(got.append)
-    dlg._update_checked("latest", UpdateInfo(__version__, "https://x/y"))
-    assert "latest version" in dlg.check_result.text() and dlg.btn_view.isHidden()
-    dlg._update_checked("available", UpdateInfo("9.9.9", "https://x/y"))
-    assert not dlg.btn_view.isHidden() and "9.9.9" in dlg.check_result.text()
-    dlg.btn_view.click()
+    box.updateRequested.connect(got.append)
+    box._on_checked({}, "available", UpdateInfo("9.9.9", "https://x/y"))
+    assert "9.9.9" in box.badges["app"].text()
+    box.rows["app"][1].click()
     assert got and got[0].version == "9.9.9"
-    dlg._update_checked("error", None)
-    assert "Could not check" in dlg.check_result.text()
+    # Settings closes itself (keeping edits) when the app update was chosen inside the box
+    dlg._app_update_chosen(got[0])
+    assert dlg.pending_update.version == "9.9.9" and dlg.result() == 1
+
+
+def test_updates_box_app_row_says_so_when_there_is_no_update(qapp, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    from app.widgets import dependency_dialog as dd
+    shown = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: shown.append(a[2])))
+    box = dd.DependencyDialog("", None, "auto", check_on_open=False)
+    box._on_checked({}, "latest", None)
+    box.rows["app"][1].click()
+    assert shown and "latest version" in shown[0]
 
 
 def test_crop_enabled_without_selection_and_section_arrows(tmp_path):
@@ -551,3 +575,26 @@ def test_waveform_peaks_math():
     assert pk == [0.0, 0.5, 1.0]
     assert bin_count(1) == 200 and bin_count(100) == 400 and bin_count(10 ** 6) == 4000
     assert peaks_from_samples(array("h"), 5) == []
+
+
+def test_updates_box_never_stays_on_checking(qapp, monkeypatch):
+    """Each item reports on its own; one that hangs is ended by the timer instead of spinning forever."""
+    import threading as th
+    from app.services import dependency_service as deps
+    from app.widgets import dependency_dialog as dd
+    release = th.Event()
+    monkeypatch.setattr(deps, "check_ffmpeg_update", lambda *a, **k: ("uptodate", "9.0.2"))
+    monkeypatch.setattr(deps, "check_ytdlp_update", lambda: (release.wait(30), ("uptodate", "x"))[1])       # hangs
+    monkeypatch.setattr(deps, "check_deno_update", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr("app.services.update_service.check_update", lambda *a, **k: ("latest", None))
+    monkeypatch.setattr(dd.DependencyDialog, "CHECK_TIMEOUT_MS", 600)
+    box = dd.DependencyDialog("", None, "auto", check_on_open=True)
+    t0 = time.time()
+    while time.time() - t0 < 5 and any("Checking" in b.text() for k, b in box.badges.items() if k != "gpu"):
+        qapp.processEvents()
+        time.sleep(0.02)
+    release.set()
+    assert "Up to date" in box.badges["ffmpeg"].text() and "Up to date" in box.badges["app"].text()
+    assert "Could not check" in box.badges["deno"].text()                  # an exception is not a hang either
+    assert "Could not check" in box.badges["ytdlp"].text()                 # the hanging one was ended by the timer
+    assert not any("Checking" in b.text() for b in box.badges.values())

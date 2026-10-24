@@ -11,6 +11,8 @@ in the browser only when the user clicks it. No user data is sent (a plain GET r
 from __future__ import annotations
 
 import json
+import platform
+import sys
 import re
 import urllib.request
 from dataclasses import dataclass
@@ -55,10 +57,21 @@ def resolve_source(source: str) -> str:
     return s
 
 
+def _arch_tag() -> str:
+    m = platform.machine().lower()
+    return "aarch64" if m in ("aarch64", "arm64") else "x86_64" if m in ("x86_64", "amd64") else m
+
+
 def _pick_asset(assets) -> dict:
-    zips = [a for a in (assets or []) if isinstance(a, dict) and str(a.get("name", "")).lower().endswith(".zip")]
-    zips.sort(key=lambda a: ("windows" not in str(a.get("name", "")).lower(), str(a.get("name", ""))))
-    return zips[0] if zips else {}
+    """The release file for this OS: ``*windows*.zip`` on Windows, ``*linux*.tar.gz`` (matching CPU) on Linux."""
+    linux = sys.platform.startswith("linux")
+    ext, tag = ((".tar.gz", ".tgz"), "linux") if linux else ((".zip",), "windows")
+    items = [a for a in (assets or []) if isinstance(a, dict) and str(a.get("name", "")).lower().endswith(ext)]
+    arch, other = _arch_tag(), {"x86_64", "aarch64"}
+    if linux:                                           # never offer the other CPU's build
+        items = [a for a in items if not any(o in str(a.get("name", "")).lower() for o in other - {arch})]
+    items.sort(key=lambda a: (tag not in str(a.get("name", "")).lower(), str(a.get("name", ""))))
+    return items[0] if items else {}
 
 
 def parse_info(raw: bytes) -> Optional[UpdateInfo]:
