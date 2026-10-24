@@ -119,5 +119,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          ls -la out
-          gh release create "${{ github.ref_name }}" out/* --repo "${{ github.repository }}" --title "${{ github.ref_name }}" --generate-notes
+          ls -laR out
+          # artifacts may contain sub-folders (e.g. installer_out) - upload files only
+          mapfile -t FILES < <(find out -type f \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.deb' -o -name '*.exe' \) | sort)
+          printf 'Uploading: %s\n' "${FILES[@]}"
+          [ "${#FILES[@]}" -gt 0 ] || { echo "no release files found"; exit 1; }
+          gh release create "${{ github.ref_name }}" "${FILES[@]}" --repo "${{ github.repository }}" --title "${{ github.ref_name }}" --generate-notes
