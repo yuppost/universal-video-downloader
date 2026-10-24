@@ -321,6 +321,7 @@ def test_check_tool_updates_reports_states_without_downloading(server, tmp_path,
 
 
 # ---- Linux static FFmpeg / Deno ---------------------------------------------------------------
+@pytest.mark.skipif(os.name == "nt", reason="Linux static build: fake shell-script 'ffmpeg' without .exe")
 def test_install_ffmpeg_from_tar_xz_with_md5_and_version_from_readme(server, tmp_path):
     import io
     import tarfile

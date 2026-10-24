@@ -258,7 +258,7 @@ def test_deb_package_layout(tmp_path):
     (app / "UniversalVideoStudio").chmod(0o755)
     (app / "_internal" / "lib.so").write_text("x")
     out = tmp_path / "x.deb"
-    subprocess.run([str(root / "packaging/linux/make_deb.sh"), str(app), "1.2.3", "amd64", str(out)], check=True,
+    subprocess.run(["sh", str(root / "packaging/linux/make_deb.sh"), str(app), "1.2.3", "amd64", str(out)], check=True,
                    capture_output=True)
     info = subprocess.run(["dpkg-deb", "-I", str(out)], capture_output=True, text=True).stdout
     assert "Package: universal-video-studio" in info and "Version: 1.2.3" in info and "Architecture: amd64" in info

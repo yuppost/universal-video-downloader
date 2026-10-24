@@ -40,6 +40,7 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE"
 cp -a dist/UniversalVideoStudio "$STAGE/UniversalVideoStudio"
 cp packaging/linux/install.sh packaging/linux/UniversalVideoStudio.desktop assets/icon.png "$STAGE/"
+chmod +x "$STAGE/install.sh"        # git on Windows / zip files may have dropped the executable bit
 tar -C "$STAGE" -czf "UniversalVideoStudio-linux-$ARCH.tar.gz" .
 rm -rf "$STAGE"
 
@@ -48,7 +49,7 @@ if command -v dpkg-deb >/dev/null 2>&1; then
   case "$ARCH" in x86_64) DEBARCH=amd64;; aarch64) DEBARCH=arm64;; *) DEBARCH="";; esac
   VERSION="$($VPY -c 'from app import __version__; print(__version__)')"
   if [ -n "$DEBARCH" ]; then
-    packaging/linux/make_deb.sh dist/UniversalVideoStudio "$VERSION" "$DEBARCH" "UniversalVideoStudio-linux-$ARCH.deb"
+    sh packaging/linux/make_deb.sh dist/UniversalVideoStudio "$VERSION" "$DEBARCH" "UniversalVideoStudio-linux-$ARCH.deb"
   fi
 fi
 echo

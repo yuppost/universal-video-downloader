@@ -87,7 +87,7 @@ jobs:
         timeout-minutes: 20
         env:
           CI: "true"
-        run: ./build.sh
+        run: bash build.sh
 
       - name: Check the archive
         run: |
