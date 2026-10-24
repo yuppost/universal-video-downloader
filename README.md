@@ -1,202 +1,353 @@
+# Universal Video Studio
 
-                                 Apache License
-                           Version 2.0, January 2004
-                        http://www.apache.org/licenses/
+A free, open-source Windows application for downloading videos, extracting audio, and creating clips from online videos.
 
-   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+Universal Video Studio brings video downloading and basic clip editing into one desktop application, with support for playlists, download queues, video previews, flexible cropping, and GPU-accelerated encoding.
 
-   1. Definitions.
+## Features
 
-      "License" shall mean the terms and conditions for use, reproduction,
-      and distribution as defined by Sections 1 through 9 of this document.
+### Video Downloading
+- Download videos from supported websites using yt-dlp.
+- Download individual videos or playlists where supported.
+- Choose from available video and audio quality options.
+- Extract audio and save it as MP3 where supported.
+- Manage multiple downloads through a queue.
+- View download progress and history.
+- Use browser cookies or supported sign-in methods for content you are authorized to access.
 
-      "Licensor" shall mean the copyright owner or entity authorized by
-      the copyright owner that is granting the License.
+### Video Preview and Clip Editing
+- Preview videos before selecting clips.
+- Work with multiple clip sections on a timeline.
+- Set the start and end points of individual clips.
+- Download or export selected clips as separate MP4 files.
+- Keep multiple clip selections organized in one workflow.
+- Adjust crop settings independently for each clip.
+- Apply crop settings to all clips when desired.
 
-      "Legal Entity" shall mean the union of the acting entity and all
-      other entities that control, are controlled by, or are under common
-      control with that entity. For the purposes of this definition,
-      "control" means (i) the power, direct or indirect, to cause the
-      direction or management of such entity, whether by contract or
-      otherwise, or (ii) ownership of fifty percent (50%) or more of the
-      outstanding shares, or (iii) beneficial ownership of such entity.
+### Flexible Cropping
+- Preset aspect ratios: 16:9, 9:16, 1:1, and Original.
+- Custom aspect ratio support.
+- Free rectangle cropping for flexible framing.
+- Adjust crop position and size to select the desired area.
+- Configure different crop settings for individual clips.
 
-      "You" (or "Your") shall mean an individual or Legal Entity
-      exercising permissions granted by this License.
+**Note:** Cropping requires video re-encoding. Depending on the source video, selected settings, and hardware, this may take longer than downloading or trimming without re-encoding.
 
-      "Source" form shall mean the preferred form for making modifications,
-      including but not limited to software source code, documentation
-      source, and configuration files.
+### Performance
+- GPU-accelerated encoding where supported by the available hardware and FFmpeg build.
+- CPU-based processing when GPU encoding is unavailable or not selected.
+- Download and processing workflows designed for desktop use.
 
-      "Object" form shall mean any form resulting from mechanical
-      transformation or translation of a Source form, including but
-      not limited to compiled object code, generated documentation,
-      and conversions to other media types.
+Actual performance depends on your hardware, source video, output settings, and installed components.
 
-      "Work" shall mean the work of authorship, whether in Source or
-      Object form, made available under the License, as indicated by a
-      copyright notice that is included in or attached to the work
-      (an example is provided in the Appendix below).
+### Windows Desktop Experience
+- Native desktop interface.
+- Organized tabs and controls for different workflows.
+- Download queue and history management.
+- Settings for supported application options.
+- A workflow designed to keep downloading and clip creation together.
 
-      "Derivative Works" shall mean any work, whether in Source or Object
-      form, that is based on (or derived from) the Work and for which the
-      editorial revisions, annotations, elaborations, or other modifications
-      represent, as a whole, an original work of authorship. For the purposes
-      of this License, Derivative Works shall not include works that remain
-      separable from, or merely link (or bind by name) to the interfaces of,
-      the Work and Derivative Works thereof.
+## Screenshots
 
-      "Contribution" shall mean any work of authorship, including
-      the original version of the Work and any modifications or additions
-      to that Work or Derivative Works thereof, that is intentionally
-      submitted to Licensor for inclusion in the Work by the copyright owner
-      or by an individual or Legal Entity authorized to submit on behalf of
-      the copyright owner. For the purposes of this definition, "submitted"
-      means any form of electronic, verbal, or written communication sent
-      to the Licensor or its representatives, including but not limited to
-      communication on electronic mailing lists, source code control systems,
-      and issue tracking systems that are managed by, or on behalf of, the
-      Licensor for the purpose of discussing and improving the Work, but
-      excluding communication that is conspicuously marked or otherwise
-      designated in writing by the copyright owner as "Not a Contribution."
+![Screenshot 1](assets/screenshots/1.png)
 
-      "Contributor" shall mean Licensor and any individual or Legal Entity
-      on behalf of whom a Contribution has been received by Licensor and
-      subsequently incorporated within the Work.
+![Screenshot 2](assets/screenshots/2.png)
 
-   2. Grant of Copyright License. Subject to the terms and conditions of
-      this License, each Contributor hereby grants to You a perpetual,
-      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-      copyright license to reproduce, prepare Derivative Works of,
-      publicly display, publicly perform, sublicense, and distribute the
-      Work and such Derivative Works in Source or Object form.
+![Screenshot 3](assets/screenshots/3.png)
 
-   3. Grant of Patent License. Subject to the terms and conditions of
-      this License, each Contributor hereby grants to You a perpetual,
-      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-      (except as stated in this section) patent license to make, have made,
-      use, offer to sell, sell, import, and otherwise transfer the Work,
-      where such license applies only to those patent claims licensable
-      by such Contributor that are necessarily infringed by their
-      Contribution(s) alone or by combination of their Contribution(s)
-      with the Work to which such Contribution(s) was submitted. If You
-      institute patent litigation against any entity (including a
-      cross-claim or counterclaim in a lawsuit) alleging that the Work
-      or a Contribution incorporated within the Work constitutes direct
-      or contributory patent infringement, then any patent licenses
-      granted to You under this License for that Work shall terminate
-      as of the date such litigation is filed.
+![Screenshot 4](assets/screenshots/4.png)
 
-   4. Redistribution. You may reproduce and distribute copies of the
-      Work or Derivative Works thereof in any medium, with or without
-      modifications, and in Source or Object form, provided that You
-      meet the following conditions:
+![Screenshot 5](assets/screenshots/5.png)
 
-      (a) You must give any other recipients of the Work or
-          Derivative Works a copy of this License; and
+![Screenshot 6](assets/screenshots/6.png)
 
-      (b) You must cause any modified files to carry prominent notices
-          stating that You changed the files; and
+## Requirements
 
-      (c) You must retain, in the Source form of any Derivative Works
-          that You distribute, all copyright, patent, trademark, and
-          attribution notices from the Source form of the Work,
-          excluding those notices that do not pertain to any part of
-          the Derivative Works; and
+- Windows 10 or Windows 11, 64-bit recommended.
+- Internet connection for online downloads.
+- Required application dependencies, such as FFmpeg and Deno, depending on the workflow and build.
+- A supported GPU and compatible FFmpeg build for GPU-accelerated encoding.
 
-      (d) If the Work includes a "NOTICE" text file as part of its
-          distribution, then any Derivative Works that You distribute must
-          include a readable copy of the attribution notices contained
-          within such NOTICE file, excluding those notices that do not
-          pertain to any part of the Derivative Works, in at least one
-          of the following places: within a NOTICE text file distributed
-          as part of the Derivative Works; within the Source form or
-          documentation, if provided along with the Derivative Works; or,
-          within a display generated by the Derivative Works, if and
-          wherever such third-party notices normally appear. The contents
-          of the NOTICE file are for informational purposes only and
-          do not modify the License. You may add Your own attribution
-          notices within Derivative Works that You distribute, alongside
-          or as an addendum to the NOTICE text from the Work, provided
-          that such additional attribution notices cannot be construed
-          as modifying the License.
+Some websites, formats, or download methods may require additional configuration.
 
-      You may add Your own copyright statement to Your modifications and
-      may provide additional or different license terms and conditions
-      for use, reproduction, or distribution of Your modifications, or
-      for any such Derivative Works as a whole, provided Your use,
-      reproduction, and distribution of the Work otherwise complies with
-      the conditions stated in this License.
+## Installation
 
-   5. Submission of Contributions. Unless You explicitly state otherwise,
-      any Contribution intentionally submitted for inclusion in the Work
-      by You to the Licensor shall be under the terms and conditions of
-      this License, without any additional terms or conditions.
-      Notwithstanding the above, nothing herein shall supersede or modify
-      the terms of any separate license agreement you may have executed
-      with Licensor regarding such Contributions.
+### Option 1: Download a Release
 
-   6. Trademarks. This License does not grant permission to use the trade
-      names, trademarks, service marks, or product names of the Licensor,
-      except as required for reasonable and customary use in describing the
-      origin of the Work and reproducing the content of the NOTICE file.
+1. Open the project's GitHub Releases page.
+2. Download the latest Windows release, if one is available.
+3. Extract the downloaded archive if necessary.
+4. Follow the included setup instructions.
+5. Install or download any required dependencies when prompted by the application.
 
-   7. Disclaimer of Warranty. Unless required by applicable law or
-      agreed to in writing, Licensor provides the Work (and each
-      Contributor provides its Contributions) on an "AS IS" BASIS,
-      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-      implied, including, without limitation, any warranties or conditions
-      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
-      PARTICULAR PURPOSE. You are solely responsible for determining the
-      appropriateness of using or redistributing the Work and assume any
-      risks associated with Your exercise of permissions under this License.
+GitHub Releases: https://github.com/yuppost/universal-video-downloader/releases
 
-   8. Limitation of Liability. In no event and under no legal theory,
-      whether in tort (including negligence), contract, or otherwise,
-      unless required by applicable law (such as deliberate and grossly
-      negligent acts) or agreed to in writing, shall any Contributor be
-      liable to You for damages, including any direct, indirect, special,
-      incidental, or consequential damages of any character arising as a
-      result of this License or out of the use or inability to use the
-      Work (including but not limited to damages for loss of goodwill,
-      work stoppage, computer failure or malfunction, or any and all
-      other commercial damages or losses), even if such Contributor
-      has been advised of the possibility of such damages.
+If no release is available yet, use the source-code installation instructions below.
 
-   9. Accepting Warranty or Additional Liability. While redistributing
-      the Work or Derivative Works thereof, You may choose to offer,
-      and charge a fee for, acceptance of support, warranty, indemnity,
-      or other liability obligations and/or rights consistent with this
-      License. However, in accepting such obligations, You may act only
-      on Your own behalf and on Your sole responsibility, not on behalf
-      of any other Contributor, and only if You agree to indemnify,
-      defend, and hold each Contributor harmless for any liability
-      incurred by, or claims asserted against, such Contributor by reason
-      of your accepting any such warranty or additional liability.
+### Option 2: Run from Source
 
-   END OF TERMS AND CONDITIONS
+1. Install a compatible version of Python.
+2. Install Git if you want to clone the repository.
+3. Clone the repository:
 
-   APPENDIX: How to apply the Apache License to your work.
+   ```bash
+   git clone https://github.com/yuppost/universal-video-downloader.git
+   ```
 
-      To apply the Apache License to your work, attach the following
-      boilerplate notice, with the fields enclosed by brackets "[]"
-      replaced with your own identifying information. (Don't include
-      the brackets!)  The text should be enclosed in the appropriate
-      comment syntax for the file format. We also recommend that a
-      file or class name and description of purpose be included on the
-      same "printed page" as the copyright notice for easier
-      identification within third-party archives.
+4. Open the project directory:
 
-   Copyright 2026 Md Masud Rana
+   ```bash
+   cd universal-video-downloader
+   ```
 
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
+5. Create and activate a virtual environment:
 
-       http://www.apache.org/licenses/LICENSE-2.0
+   ```bash
+   python -m venv .venv
+   ```
 
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
+   On Windows Command Prompt:
+
+   ```bat
+   .venv\Scripts\activate
+   ```
+
+   On PowerShell:
+
+   ```powershell
+   .\.venv\Scripts\Activate.ps1
+   ```
+
+6. Install the project's Python dependencies using its dependency file, if provided. For example:
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+7. Install and configure the required external tools according to the project's instructions.
+8. Run the application's documented entry-point script.
+
+**Important:** The exact Python version, dependency file, entry-point script, and external-tool setup depend on the current source code. Follow the instructions included in the repository if they differ from these general steps.
+
+## External Dependencies
+
+Universal Video Studio relies on external tools for some downloading and video-processing operations.
+
+### yt-dlp
+
+yt-dlp handles downloading from supported websites. Website changes may occasionally affect compatibility, and updating yt-dlp may be necessary.
+
+Official project: https://github.com/yt-dlp/yt-dlp
+
+### FFmpeg
+
+FFmpeg is used for video and audio processing, including trimming, cropping, conversion, and encoding.
+
+Official website: https://ffmpeg.org/
+
+The available encoding features depend on the installed FFmpeg build and the hardware it supports.
+
+### Deno
+
+Some supported download workflows may use Deno. Install or configure it if the application requests it.
+
+Official website: https://deno.com/
+
+Follow the application's instructions for installing and detecting required external tools. Do not download executables from untrusted sources.
+
+## Usage
+
+### Download a Video
+
+1. Open Universal Video Studio.
+2. Enter a URL supported by yt-dlp.
+3. Select the available format or quality options.
+4. Choose the destination or other supported download settings.
+5. Start the download and monitor its progress.
+
+Available options vary by website and source video.
+
+### Download a Playlist
+
+1. Enter a supported playlist URL.
+2. Review the detected playlist items and available options.
+3. Select the items you want to download, if selection is supported.
+4. Start the download and monitor the queue.
+
+Playlist availability and selection behavior depend on the source and application configuration.
+
+### Extract Audio
+
+1. Enter a supported video URL.
+2. Select the MP3 or audio extraction option, if available.
+3. Choose the destination and start processing.
+
+Audio quality depends on the source audio and the selected conversion settings. Converting an existing compressed audio stream does not restore lost quality.
+
+### Create Multiple Clips
+
+1. Open the supported video preview or clip-editing workflow.
+2. Load or select the source video.
+3. Mark the start and end points for each desired clip.
+4. Add additional clip sections as needed.
+5. Review the selected sections.
+6. Choose the output options and download or export the clips as separate MP4 files.
+
+The exact controls may vary between application versions.
+
+### Crop a Video
+
+1. Open the crop controls for the clip you want to edit.
+2. Select a preset ratio, such as 16:9, 9:16, 1:1, or Original.
+3. Alternatively, enter a custom aspect ratio or select a free rectangle.
+4. Adjust the crop position and size.
+5. Review the framing in the preview, where available.
+6. Configure other clips independently, or use Apply to All if you want to reuse the same crop settings.
+7. Export the clip.
+
+Cropping requires re-encoding and may increase processing time.
+
+## GPU Acceleration
+
+Universal Video Studio can use GPU-accelerated encoding when the selected encoder, FFmpeg build, drivers, and hardware support it.
+
+GPU acceleration is not guaranteed for every operation. Downloading, decoding, encoding, and cropping may use different processing paths.
+
+If GPU encoding fails:
+
+1. Confirm that your graphics drivers are installed and up to date.
+2. Check whether your FFmpeg build supports the selected hardware encoder.
+3. Try a supported encoder or CPU encoding.
+4. Review the application's error output or logs, if available.
+
+## Privacy and Security
+
+- Only enter URLs and credentials into workflows you trust.
+- Browser cookies and sign-in information can grant access to personal accounts. Treat exported cookie files and authentication data as sensitive.
+- Do not share cookie files, session tokens, passwords, or other authentication data.
+- Downloaded media is saved according to the application's configured destination and options.
+- Review the source code and dependencies if you want to understand how the application handles data.
+
+Do not assume that every workflow is completely offline or that all data remains local. Online downloading requires network access, and website authentication behavior depends on the selected method.
+
+## Responsible Use
+
+Universal Video Studio is a general-purpose downloading and video-processing tool.
+
+You are responsible for ensuring that your use of the application complies with applicable laws, copyright requirements, website terms of service, and the rights of content owners.
+
+Only download, process, or redistribute media when you have the necessary rights or authorization. Do not use the application to bypass access controls or to obtain content unlawfully.
+
+## Troubleshooting
+
+### A Download Fails
+
+- Check that the URL is valid and supported.
+- Confirm that the source video is still available.
+- Check your internet connection.
+- Update yt-dlp if the application supports updating it.
+- Check whether the website requires authorized authentication.
+
+### FFmpeg Is Missing
+
+Install or configure a compatible FFmpeg build and make sure the application can locate it. Follow the application's dependency instructions.
+
+### Deno Is Missing
+
+If a workflow requires Deno, install it from the official website and ensure the application can detect it.
+
+### A Website Is Not Supported
+
+yt-dlp compatibility varies by website and may change when websites update their systems. Not every URL, private video, livestream, or protected source is supported.
+
+### Cropping Is Slow
+
+Cropping requires re-encoding. Try a shorter clip, a lower output resolution, or a supported hardware encoder.
+
+### GPU Encoding Fails
+
+Check your drivers and FFmpeg encoder support. If the selected hardware encoder is unavailable, try another supported encoder or CPU encoding.
+
+### The Application Does Not Start
+
+- Check the included installation instructions.
+- Confirm that the required dependencies are installed.
+- Review any error messages or application logs.
+- If the issue persists, open a GitHub issue with the relevant error details.
+
+Do not include passwords, cookies, session tokens, or other private information in bug reports.
+
+## Known Limitations
+
+- Website compatibility depends on yt-dlp and changes made by individual websites.
+- Some sources require authentication or may not be accessible.
+- Available download formats and quality options vary by source.
+- GPU encoding depends on hardware, drivers, and the installed FFmpeg build.
+- Cropping requires re-encoding.
+- Exact behavior and available options may vary by application version.
+
+## Contributing
+
+Contributions, bug reports, and suggestions are welcome.
+
+Before submitting a contribution:
+
+1. Check existing issues to avoid duplicates.
+2. Describe the problem or proposed improvement clearly.
+3. Include reproducible steps for bugs where possible.
+4. Avoid sharing credentials, cookies, or private account information.
+5. Ensure your contribution respects the project's license and the licenses of third-party components.
+
+To report an issue, visit:
+
+https://github.com/yuppost/universal-video-downloader/issues
+
+## Development and Testing
+
+If you are contributing code:
+
+- Use a compatible Python environment.
+- Follow the existing project structure and coding conventions.
+- Install the project's documented development dependencies.
+- Run the available tests and relevant manual checks before submitting changes.
+
+Test commands and development requirements should be documented alongside the project's source code.
+
+## License
+
+Universal Video Studio is licensed under the MIT License. See the [LICENSE](LICENSE) file for the complete license text.
+
+The MIT License permits use, copying, modification, distribution, sublicensing, and sale of copies of the project, provided that the required copyright and license notices are retained.
+
+This license applies to the original project code covered by the project's copyright. Third-party tools, libraries, and bundled components remain subject to their own licenses and terms.
+
+## Third-Party Licenses
+
+Universal Video Studio may use or interact with third-party software, including:
+
+- **Python** — Python Software Foundation License.
+- **yt-dlp** — Unlicense, with applicable notices and third-party component licenses.
+- **FFmpeg** — Licensing depends on the specific build and enabled components; LGPL or GPL terms may apply.
+- **Deno** — MIT License.
+- **Other dependencies** — Subject to their respective licenses.
+
+Check the official project documentation and license files for the versions and builds you use. If distributing a packaged application, include required notices and comply with all applicable license conditions.
+
+Official resources:
+
+- Python: https://www.python.org/
+- yt-dlp: https://github.com/yt-dlp/yt-dlp
+- FFmpeg legal information: https://ffmpeg.org/legal.html
+- Deno: https://deno.com/
+
+## Disclaimer
+
+This software is provided "as is", without warranty of any kind, express or implied. See the MIT License for the full warranty disclaimer and limitation of liability.
+
+Universal Video Studio is not affiliated with, endorsed by, or officially connected to the websites supported by yt-dlp unless explicitly stated.
+
+---
+
+**Repository:** https://github.com/yuppost/universal-video-downloader
+
+**Issues and feature requests:** https://github.com/yuppost/universal-video-downloader/issues
