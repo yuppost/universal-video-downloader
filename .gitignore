@@ -6,3 +6,5 @@ __pycache__/
 ffmpeg/
 deno/
 installer_out/
+LICENSE
+README.md
