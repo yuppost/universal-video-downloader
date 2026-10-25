@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from pathlib import Path
 from typing import Optional
@@ -12,6 +13,8 @@ from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QProgressBar, QPushB
 from app.services import self_update
 from app.services.errors import FriendlyError, OperationCanceled
 from app.services.update_service import UpdateInfo
+
+log = logging.getLogger("uvs.update")
 
 
 class _Bridge(QObject):
@@ -68,9 +71,11 @@ class UpdateDialog(QDialog):
         except OperationCanceled:
             self._b.canceled.emit()
         except FriendlyError as exc:
-            self._b.failed.emit(exc.message)
+            log.warning("update failed: %s | %s", exc.message, exc.details)
+            self._b.failed.emit(exc.message + (f"\n({exc.details[:300]})" if exc.details else ""))
         except Exception as exc:  # noqa: BLE001
-            self._b.failed.emit(f"Update failed: {exc}")
+            log.exception("update crashed")
+            self._b.failed.emit(f"Update failed: {type(exc).__name__}: {exc}")
 
     def _progress(self, pct, msg: str) -> None:
         self.status.setText(msg)
