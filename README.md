@@ -38,8 +38,11 @@ tar xzf UniversalVideoStudio-linux-x86_64.tar.gz
 ```
 **Debian / Ubuntu / Mint:** download `UniversalVideoStudio-linux-x86_64.deb` (or `-aarch64`) and run
 `sudo apt install ./UniversalVideoStudio-linux-x86_64.deb` (installs to `/opt/universal-video-studio`, command
-`universal-video-studio`, menu entry; remove with `sudo apt remove universal-video-studio`). A `.deb` install is owned by root,
-so the app cannot replace itself: it shows "Update available" and opens the download page - install the newer `.deb`.
+`universal-video-studio`, menu entry; remove with `sudo apt remove universal-video-studio`). A `.deb` install is owned by root, so
+**Update now** downloads the newer `.deb` (SHA-256 checked), installs it with `pkexec apt-get install` (a system dialog asks
+for your password) and restarts the app. Without `pkexec` it opens the download page - install the newer `.deb` yourself.
+The release version always comes from the Git tag (the workflow writes `v1.9.2` into `app/__init__.py` before building),
+so a forgotten version bump can no longer produce a `.deb` that apt calls "already installed".
 Use the `.tar.gz` below if you want the one-click update.
 
 Remove the `.tar.gz` install with `./install.sh --uninstall`. Settings, sign-ins and history live in `~/.local/share/UniversalVideoStudio`

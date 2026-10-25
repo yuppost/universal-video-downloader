@@ -116,12 +116,15 @@ class MainWindow(QMainWindow):
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QDesktopServices
         from app.services import self_update
-        one_click = bool(info.asset_url) and self_update.can_self_update()
+        pkg = bool(getattr(info, "deb_url", "")) and self_update.can_pkg_update()
+        one_click = (bool(info.asset_url) and self_update.can_self_update()) or pkg
         box = QMessageBox(QMessageBox.Information, "New version available",
                           f"Version {info.version} is available (you have {__version__}).\n\n"
                           + (info.notes + "\n\n" if info.notes else "")
-                          + ("Update now downloads it, replaces the app files and restarts the app.\n"
-                             "Your settings, sign-ins and history are kept." if one_click else
+                          + (("Update now downloads the package, asks for your administrator password to install it "
+                              "and restarts the app.\n" if pkg else
+                              "Update now downloads it, replaces the app files and restarts the app.\n")
+                             + "Your settings, sign-ins and history are kept." if one_click else
                              f"Download page: {urlsplit(info.url).hostname}\n"
                              "Close the app, then replace your old folder with the new one."), QMessageBox.NoButton, self)
         b_now = box.addButton("Update now", QMessageBox.AcceptRole) if one_click else None
@@ -143,11 +146,14 @@ class MainWindow(QMainWindow):
                 "Continue?") != QMessageBox.Yes:
             return
         dlg = UpdateDialog(info, self)
-        if dlg.exec() != QDialog.Accepted or dlg.new_dir is None:
+        if dlg.exec() != QDialog.Accepted or (dlg.new_dir is None and not dlg.installed):
             return
         try:
             self._quitting_for_update = True
-            self_update.launch_helper(dlg.new_dir)
+            if dlg.installed:
+                self_update.relaunch_after_install()
+            else:
+                self_update.launch_helper(dlg.new_dir)
         except OSError as exc:
             self._quitting_for_update = False
             QMessageBox.warning(self, "Update", f"The update could not be started: {exc}")

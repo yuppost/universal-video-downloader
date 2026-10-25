@@ -46,6 +46,84 @@ def can_self_update() -> bool:
         return False
 
 
+PKG_NAME = "universal-video-studio"
+
+
+def is_deb_install() -> bool:
+    """True when the running app lives in the folder the .deb package installs to (/opt/universal-video-studio)."""
+    if not (sys.platform.startswith("linux") and getattr(sys, "frozen", False)):
+        return False
+    try:
+        return app_dir().resolve() == Path("/opt/universal-video-studio") and shutil.which("dpkg-deb") is not None
+    except OSError:
+        return False
+
+
+def can_pkg_update() -> bool:
+    """A .deb install can update itself by asking the user for the administrator password (polkit)."""
+    return is_deb_install() and shutil.which("pkexec") is not None and shutil.which("apt-get") is not None
+
+
+def prepare_deb(url: str, sha256: str, progress: Progress, cancel: threading.Event,
+                work: Optional[Path] = None, allow_http: bool = False) -> Path:
+    """Download + verify the .deb. SHA-256 is mandatory because it is installed with administrator rights."""
+    from app.services import dependency_service as deps
+    if not sha256:
+        raise FriendlyError("This release has no checksum, so it is not installed automatically. "
+                            "Use the download page and install the .deb manually.")
+    work = work or work_dir()
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir(parents=True, exist_ok=True)
+    deb = work / "update.deb"
+    deps.download_file(url, deb, progress, cancel, allow_http, "Downloading update")
+    progress(None, "Verifying download...", None)
+    if _sha256(deb) != sha256.lower():
+        deb.unlink(missing_ok=True)
+        raise FriendlyError("The downloaded update failed its integrity check (SHA-256 mismatch). Nothing was changed.")
+    try:
+        name = subprocess.run(["dpkg-deb", "-f", str(deb), "Package"], capture_output=True, text=True, timeout=30).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        name = ""
+    if name != PKG_NAME:
+        deb.unlink(missing_ok=True)
+        raise FriendlyError("The downloaded file is not a Universal Video Studio package.")
+    return deb
+
+
+def install_deb(deb: Path, progress: Progress, cancel: threading.Event) -> None:
+    """Install with ``pkexec apt-get install`` (a system dialog asks for the password). Raises FriendlyError."""
+    progress(None, "Waiting for your administrator password...", None)
+    cmd = ["pkexec", "apt-get", "install", "-y", "--allow-downgrades", str(deb)]
+    env = dict(os.environ, DEBIAN_FRONTEND="noninteractive")
+    try:
+        p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
+    except OSError as exc:
+        raise FriendlyError("The installer could not be started.", str(exc)) from exc
+    out = ""
+    while True:
+        try:
+            out, _ = p.communicate(timeout=0.5)
+            break
+        except subprocess.TimeoutExpired:
+            if cancel.is_set():
+                p.terminate()
+                raise OperationCanceled()
+            progress(None, "Installing the update...", None)
+    if p.returncode in (126, 127):
+        raise FriendlyError("The administrator password was not entered, so nothing was changed.")
+    if p.returncode != 0:
+        raise FriendlyError("The package could not be installed.", (out or "")[-300:])
+    progress(100.0, "Installed", None)
+
+
+def relaunch_after_install() -> None:
+    """Detached helper: wait until this process is gone, then start the freshly installed app."""
+    script = ('while kill -0 "$1" 2>/dev/null; do sleep 0.3; done; sleep 1; '
+              'nohup /usr/bin/universal-video-studio >/dev/null 2>&1 &')
+    subprocess.Popen(["/bin/sh", "-c", script, "sh", str(os.getpid())], start_new_session=True, close_fds=True,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=clean_env())
+
+
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:

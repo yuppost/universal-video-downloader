@@ -29,6 +29,8 @@ class UpdateInfo:
     asset_url: str = ""           # direct https link of the zip, enables the one-click update
     sha256: str = ""
     size: int = 0
+    deb_url: str = ""             # Linux: the .deb of this release (used when the app was installed from a .deb)
+    deb_sha256: str = ""
 
 
 def version_tuple(v: str) -> Tuple[int, ...]:
@@ -75,8 +77,20 @@ def _pick_asset(assets) -> dict:
     return items[0] if items else {}
 
 
+def _pick_deb(assets) -> dict:
+    arch, other = _arch_tag(), {"x86_64", "aarch64"}
+    items = [a for a in (assets or []) if isinstance(a, dict) and str(a.get("name", "")).lower().endswith(".deb")
+             and not any(o in str(a.get("name", "")).lower() for o in other - {arch})]
+    return items[0] if items else {}
+
+
+def _sha_of(asset: dict) -> str:
+    d = str(asset.get("digest", ""))
+    return d.split(":", 1)[-1] if d.startswith("sha256:") else ""
+
+
 def parse_info(raw: bytes) -> Optional[UpdateInfo]:
-    asset_url = sha = ""
+    asset_url = sha = deb_url = deb_sha = ""
     size = 0
     try:
         data = json.loads(raw.decode("utf-8-sig"))
@@ -87,7 +101,10 @@ def parse_info(raw: bytes) -> Optional[UpdateInfo]:
             url = str(data["html_url"]).strip()
             a = _pick_asset(data.get("assets"))
             asset_url = str(a.get("browser_download_url", ""))
-            sha = str(a.get("digest", "")).split(":", 1)[-1] if str(a.get("digest", "")).startswith("sha256:") else ""
+            sha = _sha_of(a)
+            if sys.platform.startswith("linux"):
+                d = _pick_deb(data.get("assets"))
+                deb_url, deb_sha = str(d.get("browser_download_url", "")), _sha_of(d)
             size = int(a.get("size") or 0)
             data = {"notes": data.get("body") or data.get("name") or ""}
         else:
@@ -101,7 +118,11 @@ def parse_info(raw: bytes) -> Optional[UpdateInfo]:
         asset_url = ""
     if sha and not re.fullmatch(r"[0-9a-fA-F]{64}", sha):
         sha = ""
-    return UpdateInfo(ver, url, str(data.get("notes", ""))[:2000], asset_url, sha.lower(), size)
+    if deb_url and urlsplit(deb_url).scheme.lower() != "https":
+        deb_url = ""
+    if deb_sha and not re.fullmatch(r"[0-9a-fA-F]{64}", deb_sha):
+        deb_sha = ""
+    return UpdateInfo(ver, url, str(data.get("notes", ""))[:2000], asset_url, sha.lower(), size, deb_url, deb_sha.lower())
 
 
 def check_update(source: str, current: str, timeout: int = 8) -> Tuple[str, Optional[UpdateInfo]]:

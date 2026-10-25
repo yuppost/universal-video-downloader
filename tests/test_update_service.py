@@ -1,6 +1,8 @@
 """App update check (local server, no real network)."""
 import http.server
 import os
+import platform
+import sys
 import json
 import threading
 
@@ -271,3 +273,64 @@ def test_deb_package_layout(tmp_path):
     ex = tmp_path / "x"
     subprocess.run(["dpkg-deb", "-x", str(out), str(ex)], check=True)
     assert os.access(ex / "opt/universal-video-studio/UniversalVideoStudio", os.X_OK)
+
+
+# ---- .deb installs update through the package manager -----------------------------------
+from app.services import self_update as su  # noqa: E402
+
+
+def _release(assets):
+    import json
+    return json.dumps({"tag_name": "v9.9.9", "html_url": "https://github.com/o/r/releases/tag/v9.9.9", "body": "n",
+                       "assets": assets}).encode()
+
+
+def test_parse_info_offers_the_deb_with_its_checksum(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
+    h = "a" * 64
+    info = u.parse_info(_release([
+        {"name": "UniversalVideoStudio-linux-aarch64.deb", "browser_download_url": "https://x/arm.deb", "digest": "sha256:" + "b" * 64},
+        {"name": "UniversalVideoStudio-linux-x86_64.deb", "browser_download_url": "https://x/amd.deb", "digest": "sha256:" + h},
+        {"name": "UniversalVideoStudio-linux-x86_64.tar.gz", "browser_download_url": "https://x/a.tar.gz", "digest": "sha256:" + h}]))
+    assert info.deb_url == "https://x/amd.deb" and info.deb_sha256 == h and info.asset_url == "https://x/a.tar.gz"
+
+
+def test_prepare_deb_requires_a_checksum_and_matching_hash(tmp_path, monkeypatch):
+    import threading
+    from app.services.errors import FriendlyError
+    with pytest.raises(FriendlyError):
+        su.prepare_deb("https://x/a.deb", "", lambda *a: None, threading.Event(), tmp_path)
+    from app.services import dependency_service as deps
+
+    def fake_dl(url, dest, *a, **k):
+        dest.write_bytes(b"not a deb")
+        return dest
+    monkeypatch.setattr(deps, "download_file", fake_dl)
+    with pytest.raises(FriendlyError, match="integrity"):
+        su.prepare_deb("https://x/a.deb", "0" * 64, lambda *a: None, threading.Event(), tmp_path)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="needs a POSIX shell")
+def test_install_deb_uses_pkexec_and_reports_a_cancelled_password(tmp_path, monkeypatch):
+    import stat
+    import threading
+    from app.services.errors import FriendlyError
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    log = tmp_path / "args.txt"
+    px = bindir / "pkexec"
+    px.write_text(f'#!/bin/sh\necho "$@" > {log}\nexit ${{PX_EXIT:-0}}\n')
+    px.chmod(px.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
+    deb = tmp_path / "u.deb"
+    deb.write_bytes(b"x")
+    su.install_deb(deb, lambda *a: None, threading.Event())
+    assert log.read_text().split()[:3] == ["apt-get", "install", "-y"] and str(deb) in log.read_text()
+    monkeypatch.setenv("PX_EXIT", "126")
+    with pytest.raises(FriendlyError, match="password"):
+        su.install_deb(deb, lambda *a: None, threading.Event())
+
+
+def test_non_deb_install_never_uses_package_update():
+    assert su.can_pkg_update() is False

@@ -41,7 +41,7 @@ Recommends: ffmpeg
 Description: Download, trim and crop videos
  Paste a video link, mark several sections on a timeline and export each as its own
  file. FFmpeg (if not installed) and the YouTube helper are downloaded on first start.
- The app does not update itself when installed from this package: install the newer .deb.
+ Updates: the app downloads the newer .deb and installs it after asking for your password.
 CTRL
 cat > "$PKG/DEBIAN/postinst" <<'POST'
 #!/bin/sh
