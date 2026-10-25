@@ -58,8 +58,6 @@ def main() -> int:
     app = QApplication(sys.argv)
     from app import APP_NAME, appicon
     app.setApplicationName(APP_NAME)
-    if sys.platform.startswith("linux"):
-        app.setDesktopFileName("UniversalVideoStudio")      # matches the .desktop file: right icon/name in the dock
     app.setOrganizationName("UniversalVideoStudio")
     # Show something at once: loading the rest (Qt multimedia, yt-dlp, ...) takes a few seconds on Windows.
     pm = QPixmap(420, 190)

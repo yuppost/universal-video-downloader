@@ -139,17 +139,6 @@ def test_status_when_nothing_found(monkeypatch):
     assert not st.ffmpeg_ok and not st.ytdlp_ok and not st.all_ok
 
 
-def test_non_windows_gives_manual_hint(monkeypatch):
-    monkeypatch.setattr(deps.platform, "machine", lambda: "riscv64")      # a CPU with no automatic download
-    monkeypatch.setattr(deps.os, "name", "posix")
-    with pytest.raises(FriendlyError) as ei:
-        deps.install_ffmpeg(lambda *a: None, threading.Event())
-    assert "package manager" in ei.value.message
-    with pytest.raises(FriendlyError) as ei:
-        deps.install_deno(lambda *a: None, threading.Event())
-    assert "Node.js" in ei.value.message
-
-
 @pytest.mark.skipif(os.name == "nt", reason="uses a fake shell-script 'deno'")
 def test_install_deno_from_local_server(server, tmp_path):
     www, base = server
@@ -320,46 +309,3 @@ def test_check_tool_updates_reports_states_without_downloading(server, tmp_path,
     assert not calls
 
 
-# ---- Linux static FFmpeg / Deno ---------------------------------------------------------------
-@pytest.mark.skipif(os.name == "nt", reason="Linux static build: fake shell-script 'ffmpeg' without .exe")
-def test_install_ffmpeg_from_tar_xz_with_md5_and_version_from_readme(server, tmp_path):
-    import io
-    import tarfile
-    www, base = server
-    with tarfile.open(www / "ff.tar.xz", "w:xz") as t:
-        for name, mode in (("ffmpeg-7.0.2-amd64-static/ffmpeg", 0o755), ("ffmpeg-7.0.2-amd64-static/ffprobe", 0o755),
-                           ("ffmpeg-7.0.2-amd64-static/manpages/ffmpeg", 0o644)):
-            body = b"#!/bin/sh\necho 'ffmpeg version 7.0.2-static'\n"
-            ti = tarfile.TarInfo(name)
-            ti.size, ti.mode = len(body), mode
-            t.addfile(ti, io.BytesIO(body))
-    md5 = hashlib.md5((www / "ff.tar.xz").read_bytes()).hexdigest()
-    (www / "ff.tar.xz.md5").write_text(f"{md5}  ff.tar.xz\n")
-    dest = tmp_path / "ffmpeg"
-    out = deps.install_ffmpeg(lambda *a: None, threading.Event(), sources=[(f"{base}/ff.tar.xz", f"{base}/ff.tar.xz.md5")],
-                              dest_dir=dest, allow_http=True)
-    assert (out / "ffmpeg").is_file() and (out / "ffprobe").is_file() and os.access(out / "ffmpeg", os.X_OK)
-    assert not (out / "manpages").exists()
-    (www / "ff.tar.xz.md5").write_text("0" * 32 + "  ff.tar.xz\n")                 # wrong checksum is refused
-    with pytest.raises(FriendlyError) as ei:
-        deps.install_ffmpeg(lambda *a: None, threading.Event(), sources=[(f"{base}/ff.tar.xz", f"{base}/ff.tar.xz.md5")],
-                            dest_dir=tmp_path / "f2", allow_http=True)
-    assert "integrity" in ei.value.message
-    (www / "release-readme.txt").write_text("FFmpeg Static Build\n\nversion: 7.1.1\n\nlicense: GPLv3\n")
-    assert deps.latest_ffmpeg_version(f"{base}/release-readme.txt", allow_http=True) == "7.1.1"
-
-
-def test_default_sources_follow_the_platform(monkeypatch):
-    monkeypatch.setattr(deps.os, "name", "posix")
-    monkeypatch.setattr(deps.sys, "platform", "linux")
-    monkeypatch.setattr(deps.platform, "machine", lambda: "x86_64")
-    ff, dn = deps.default_ffmpeg_sources(), deps.default_deno_sources()
-    assert ff[0][0].endswith("ffmpeg-release-amd64-static.tar.xz") and ff[0][1].endswith(".md5")
-    assert dn[0][0].endswith("deno-x86_64-unknown-linux-gnu.zip")
-    monkeypatch.setattr(deps.platform, "machine", lambda: "aarch64")
-    assert deps.default_ffmpeg_sources()[0][0].endswith("arm64-static.tar.xz")
-    assert deps.default_deno_sources()[0][0].endswith("aarch64-unknown-linux-gnu.zip")
-    monkeypatch.setattr(deps.os, "name", "nt")
-    monkeypatch.setattr(deps.sys, "platform", "win32")
-    assert deps.default_ffmpeg_sources()[0][0].endswith("ffmpeg-release-essentials.zip")
-    assert deps.default_deno_sources()[0][0].endswith("windows-msvc.zip")

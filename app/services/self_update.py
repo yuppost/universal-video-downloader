@@ -12,7 +12,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tarfile
 import tempfile
 import threading
 import zipfile
@@ -21,7 +20,7 @@ from typing import Callable, Optional
 
 from app.services.errors import FriendlyError, OperationCanceled
 
-EXE_NAME = "UniversalVideoStudio.exe" if os.name == "nt" else "UniversalVideoStudio"
+EXE_NAME = "UniversalVideoStudio.exe"
 Progress = Callable[[Optional[float], str, Optional[float]], None]
 
 
@@ -34,8 +33,8 @@ def work_dir() -> Path:
 
 
 def can_self_update() -> bool:
-    """Only the packaged app (Windows / Linux) whose folder is writable (not C:\\Program Files, /opt) can replace itself."""
-    if not (os.name == "nt" or sys.platform.startswith("linux")) or not getattr(sys, "frozen", False):
+    """Only the packaged Windows app whose folder is writable (not C:\\Program Files) can replace itself."""
+    if os.name != "nt" or not getattr(sys, "frozen", False):
         return False
     try:
         probe = app_dir() / ".write_test"
@@ -44,84 +43,6 @@ def can_self_update() -> bool:
         return (app_dir() / EXE_NAME).is_file()
     except OSError:
         return False
-
-
-PKG_NAME = "universal-video-studio"
-
-
-def is_deb_install() -> bool:
-    """True when the running app lives in the folder the .deb package installs to (/opt/universal-video-studio)."""
-    if not (sys.platform.startswith("linux") and getattr(sys, "frozen", False)):
-        return False
-    try:
-        return app_dir().resolve() == Path("/opt/universal-video-studio") and shutil.which("dpkg-deb") is not None
-    except OSError:
-        return False
-
-
-def can_pkg_update() -> bool:
-    """A .deb install can update itself by asking the user for the administrator password (polkit)."""
-    return is_deb_install() and shutil.which("pkexec") is not None and shutil.which("apt-get") is not None
-
-
-def prepare_deb(url: str, sha256: str, progress: Progress, cancel: threading.Event,
-                work: Optional[Path] = None, allow_http: bool = False) -> Path:
-    """Download + verify the .deb. SHA-256 is mandatory because it is installed with administrator rights."""
-    from app.services import dependency_service as deps
-    if not sha256:
-        raise FriendlyError("This release has no checksum, so it is not installed automatically. "
-                            "Use the download page and install the .deb manually.")
-    work = work or work_dir()
-    shutil.rmtree(work, ignore_errors=True)
-    work.mkdir(parents=True, exist_ok=True)
-    deb = work / "update.deb"
-    deps.download_file(url, deb, progress, cancel, allow_http, "Downloading update")
-    progress(None, "Verifying download...", None)
-    if _sha256(deb) != sha256.lower():
-        deb.unlink(missing_ok=True)
-        raise FriendlyError("The downloaded update failed its integrity check (SHA-256 mismatch). Nothing was changed.")
-    try:
-        name = subprocess.run(["dpkg-deb", "-f", str(deb), "Package"], capture_output=True, text=True, timeout=30).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        name = ""
-    if name != PKG_NAME:
-        deb.unlink(missing_ok=True)
-        raise FriendlyError("The downloaded file is not a Universal Video Studio package.")
-    return deb
-
-
-def install_deb(deb: Path, progress: Progress, cancel: threading.Event) -> None:
-    """Install with ``pkexec apt-get install`` (a system dialog asks for the password). Raises FriendlyError."""
-    progress(None, "Waiting for your administrator password...", None)
-    cmd = ["pkexec", "apt-get", "install", "-y", "--allow-downgrades", str(deb)]
-    env = dict(os.environ, DEBIAN_FRONTEND="noninteractive")
-    try:
-        p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
-    except OSError as exc:
-        raise FriendlyError("The installer could not be started.", str(exc)) from exc
-    out = ""
-    while True:
-        try:
-            out, _ = p.communicate(timeout=0.5)
-            break
-        except subprocess.TimeoutExpired:
-            if cancel.is_set():
-                p.terminate()
-                raise OperationCanceled()
-            progress(None, "Installing the update...", None)
-    if p.returncode in (126, 127):
-        raise FriendlyError("The administrator password was not entered, so nothing was changed.")
-    if p.returncode != 0:
-        raise FriendlyError("The package could not be installed.", (out or "")[-300:])
-    progress(100.0, "Installed", None)
-
-
-def relaunch_after_install() -> None:
-    """Detached helper: wait until this process is gone, then start the freshly installed app."""
-    script = ('while kill -0 "$1" 2>/dev/null; do sleep 0.3; done; sleep 1; '
-              'nohup /usr/bin/universal-video-studio >/dev/null 2>&1 &')
-    subprocess.Popen(["/bin/sh", "-c", script, "sh", str(os.getpid())], start_new_session=True, close_fds=True,
-                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=clean_env())
 
 
 def _sha256(path: Path) -> str:
@@ -133,24 +54,9 @@ def _sha256(path: Path) -> str:
 
 
 def safe_extract(zip_path: Path, dest: Path) -> None:
-    """Unpack a .zip or .tar.gz update, rejecting any path that would leave *dest*."""
+    """Unpack a .zip update, rejecting any path that would leave *dest*."""
     dest.mkdir(parents=True, exist_ok=True)
     base = dest.resolve()
-    if str(zip_path).lower().endswith((".tar.gz", ".tgz")):
-        with tarfile.open(zip_path, "r:gz") as t:
-            for m in t.getmembers():
-                target = (dest / m.name).resolve()
-                if base != target and base not in target.parents:
-                    raise FriendlyError("The update archive contains an unsafe path and was rejected.")
-                if m.issym() or m.islnk():                       # links may point anywhere: allow only inside dest
-                    link = (dest / Path(m.name).parent / m.linkname).resolve() if m.issym() else (dest / m.linkname).resolve()
-                    if base != link and base not in link.parents:
-                        raise FriendlyError("The update archive contains an unsafe link and was rejected.")
-            try:
-                t.extractall(dest, filter="data")
-            except TypeError:                                    # Python without extraction filters
-                t.extractall(dest)
-        return
     with zipfile.ZipFile(zip_path) as z:
         for info in z.infolist():
             target = (dest / info.filename).resolve()
@@ -176,7 +82,7 @@ def prepare(asset_url: str, sha256: str, progress: Progress, cancel: threading.E
     work = work or work_dir()
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True, exist_ok=True)
-    z = work / ("update.tar.gz" if asset_url.lower().endswith((".tar.gz", ".tgz")) else "update.zip")
+    z = work / "update.zip"
     deps.download_file(asset_url, z, progress, cancel, allow_http, "Downloading update")
     progress(None, "Verifying download...", None)
     if sha256 and _sha256(z) != sha256.lower():
@@ -186,7 +92,7 @@ def prepare(asset_url: str, sha256: str, progress: Progress, cancel: threading.E
     progress(None, "Unpacking...", None)
     try:
         safe_extract(z, work / "new")
-    except (zipfile.BadZipFile, tarfile.TarError, EOFError) as exc:
+    except (zipfile.BadZipFile, EOFError) as exc:
         raise FriendlyError("The downloaded update is not a valid archive.") from exc
     root = find_root(work / "new")
     z.unlink(missing_ok=True)
@@ -258,79 +164,17 @@ def clean_env() -> dict:
 
     A PyInstaller app that starts *itself* hands its internal variables to the child, which then believes it is
     a worker of the old process (and can silently fail to start after its files were replaced). They are removed,
-    and PyInstaller is told to treat the new process as a fresh one. On Linux the library search path that the
-    bootloader set for the old app is put back to what the user had (it points into the old, replaced folder).
+    and PyInstaller is told to treat the new process as a fresh one.
     """
     env = {k: v for k, v in os.environ.items() if not (k.startswith("_PYI") or k in ("_MEIPASS2", "_MEIPASS"))}
     env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
-    if sys.platform.startswith("linux") and getattr(sys, "frozen", False):
-        orig = env.pop("LD_LIBRARY_PATH_ORIG", None)
-        if orig:
-            env["LD_LIBRARY_PATH"] = orig
-        else:
-            env.pop("LD_LIBRARY_PATH", None)
     return env
-
-
-def build_script_posix() -> str:
-    """The helper for Linux (POSIX sh). Arguments: PID, app folder, new folder, exe path, log file."""
-    return "\n".join([
-        "#!/bin/sh",
-        'PID="$1"; APP="$2"; NEW="$3"; EXE="$4"; LOG="$5"',
-        'echo "[update] waiting for the app to exit (pid $PID)" > "$LOG"',
-        "n=0",
-        'while kill -0 "$PID" 2>/dev/null; do',
-        "  n=$((n+1))",
-        '  if [ "$n" -ge 40 ]; then',
-        '    echo "[update] the app did not exit - ending it" >> "$LOG"',
-        '    kill -9 "$PID" 2>/dev/null',
-        "    sleep 2",
-        "    break",
-        "  fi",
-        "  sleep 1",
-        "done",
-        "tries=0",
-        "while :; do",
-        # mirror: remove everything except the user's data/portable flag, then copy the new files (permissions kept)
-        '  find "$APP" -mindepth 1 -maxdepth 1 ! -name data ! -name portable.flag -exec rm -rf {} + >> "$LOG" 2>&1',
-        '  if cp -a "$NEW"/. "$APP"/ >> "$LOG" 2>&1; then',
-        '    echo "[update] files replaced" >> "$LOG"',
-        "    break",
-        "  fi",
-        "  tries=$((tries+1))",
-        '  if [ "$tries" -ge 5 ]; then echo "[update] FAILED: files could not be replaced" >> "$LOG"; break; fi',
-        "  sleep 3",
-        "done",
-        'chmod +x "$EXE" 2>/dev/null',
-        'echo "[update] starting $EXE" >> "$LOG"',
-        'cd "$APP" 2>/dev/null',
-        'nohup "$EXE" >/dev/null 2>&1 &',
-        "sleep 8",
-        # make sure the new app is really running (process names are cut to 15 characters)
-        'NAME=$(basename "$EXE" | cut -c1-15)',
-        'if command -v pgrep >/dev/null 2>&1 && ! pgrep -x "$NAME" >/dev/null 2>&1; then',
-        '  echo "[update] the app is not running - starting it again" >> "$LOG"',
-        '  nohup "$EXE" >/dev/null 2>&1 &',
-        "fi",
-        'echo "[update] done" >> "$LOG"',
-        "exit 0",
-        "",
-    ])
 
 
 def launch_helper(new_dir: Path) -> None:
     """Start the helper detached from this process. The caller must quit the app right afterwards."""
     work = work_dir()
     work.mkdir(parents=True, exist_ok=True)
-    if os.name != "nt":
-        script = work / "apply_update.sh"
-        script.write_text(build_script_posix(), encoding="ascii")
-        script.chmod(0o755)
-        args = ["/bin/sh", str(script), str(os.getpid()), str(app_dir()), str(new_dir), str(app_dir() / EXE_NAME),
-                str(work / "update.log")]
-        subprocess.Popen(args, start_new_session=True, close_fds=True, stdin=subprocess.DEVNULL,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=clean_env())
-        return
     script = work / "apply_update.cmd"
     script.write_bytes(build_script().encode("ascii"))
     # CREATE_NO_WINDOW (not DETACHED_PROCESS): the helper gets one hidden console that tasklist/robocopy/ping inherit,

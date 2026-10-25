@@ -34,7 +34,6 @@ class UpdateDialog(QDialog):
         self.setMinimumWidth(420)
         self.info = info
         self.new_dir: Optional[Path] = None
-        self.installed = False                      # True after a .deb update was installed (Linux package install)
         self.cancel_event = threading.Event()
         lay = QVBoxLayout(self)
         self.title = QLabel(f"<b>Updating to version {info.version}</b>")
@@ -59,12 +58,6 @@ class UpdateDialog(QDialog):
 
     def _run(self) -> None:
         try:
-            if self.info.deb_url and self_update.can_pkg_update():
-                prog = lambda p, m, s: self._b.progress.emit(p, m)  # noqa: E731
-                deb = self_update.prepare_deb(self.info.deb_url, self.info.deb_sha256, prog, self.cancel_event)
-                self_update.install_deb(deb, prog, self.cancel_event)
-                self._b.done.emit(None)
-                return
             d = self_update.prepare(self.info.asset_url, self.info.sha256,
                                     lambda p, m, s: self._b.progress.emit(p, m), self.cancel_event)
             self._b.done.emit(d)
@@ -87,7 +80,6 @@ class UpdateDialog(QDialog):
 
     def _done(self, d) -> None:
         self.new_dir = d
-        self.installed = d is None
         self.accept()
 
     def _failed(self, msg: str) -> None:

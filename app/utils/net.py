@@ -1,8 +1,7 @@
 """HTTPS helper: urllib with the system certificates *plus* certifi's bundle.
 
-A PyInstaller build on some Linux distributions cannot find the system CA folder, which makes every HTTPS download
-fail with CERTIFICATE_VERIFY_FAILED. Adding certifi's bundle (shipped with the app) fixes that without turning
-verification off.
+Adding certifi's bundle (shipped with the app) avoids CERTIFICATE_VERIFY_FAILED on PCs with an incomplete certificate
+store, without turning verification off.
 """
 
 from __future__ import annotations

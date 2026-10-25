@@ -1,6 +1,6 @@
 # Universal Video Studio
 
-A Windows and Linux desktop app (Python 3.11, PySide6, yt-dlp, FFmpeg) that lets you paste a video link, mark **several sections** of the
+A Windows desktop app (Python 3.11, PySide6, yt-dlp, FFmpeg) that lets you paste a video link, mark **several sections** of the
 video on an interactive timeline, and export **each section as its own file** (`my_video_clip_01.mp4`, `_02`, ...). Everything
 runs locally - no cloud service, Node.js, Docker or database.
 
@@ -29,32 +29,6 @@ runs locally - no cloud service, Node.js, Docker or database.
 * MP4 or MP3; quality limit (360p ... 2160p / best); H.264 or H.265 re-encode codec. Missing resolutions are reported, never upscaled.
 * Download manager with queue, per-job status/progress/speed/ETA (only shown when measurable), cancel, retry (failed jobs only), open folder, history.
 * Dark/light theme, shortcuts, drag-and-drop of a link onto the window, persistent settings.
-
-## Install (Linux)
-**Ready-made app:** download `UniversalVideoStudio-linux-x86_64.tar.gz` (or `-aarch64`) from the GitHub Release, then
-```sh
-tar xzf UniversalVideoStudio-linux-x86_64.tar.gz
-./install.sh            # installs to ~/.local/opt/UniversalVideoStudio and adds a menu entry (no root needed)
-```
-**Debian / Ubuntu / Mint:** download `UniversalVideoStudio-linux-x86_64.deb` (or `-aarch64`) and run
-`sudo apt install ./UniversalVideoStudio-linux-x86_64.deb` (installs to `/opt/universal-video-studio`, command
-`universal-video-studio`, menu entry; remove with `sudo apt remove universal-video-studio`). A `.deb` install is owned by root, so
-**Update now** downloads the newer `.deb` (SHA-256 checked), installs it with `pkexec apt-get install` (a system dialog asks
-for your password) and restarts the app. Without `pkexec` it opens the download page - install the newer `.deb` yourself.
-The release version always comes from the Git tag (the workflow writes `v1.9.2` into `app/__init__.py` before building),
-so a forgotten version bump can no longer produce a `.deb` that apt calls "already installed".
-Use the `.tar.gz` below if you want the one-click update.
-
-Remove the `.tar.gz` install with `./install.sh --uninstall`. Settings, sign-ins and history live in `~/.local/share/UniversalVideoStudio`
-and downloads in `~/Videos/UniversalVideoStudio/Video` (MP3: `.../Audio`). FFmpeg and Deno are downloaded on first launch
-(static FFmpeg build, checksum checked); if `ffmpeg` is already installed (`sudo apt install ffmpeg`) it is used instead.
-One-click updates work because the install folder is writable. On a bare Debian/Ubuntu desktop the Qt libraries may need:
-`sudo apt install libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libnss3 libasound2`.
-
-**From source:** `sh run.sh` (creates `.venv`, installs `requirements.txt`, starts the app). **Build:** `sh build.sh` runs the
-tests, builds with PyInstaller and writes `UniversalVideoStudio-linux-<cpu>.tar.gz` (the GitHub workflow does this on Ubuntu 22.04
-so it runs on most distributions). Linux uses the system's `xdg-open` for "open folder" and needs an NVIDIA driver (nvidia-smi)
-only if you want GPU encoding.
 
 ## Install (Windows)
 1. **Python 3.11 (64-bit)** - https://www.python.org/downloads/windows/ (tick *Add python.exe to PATH*).
@@ -97,7 +71,7 @@ yt-dlp installs through pip into the app's own `.venv`; in a packaged build yt-d
 * **Any website**: the browser window has an address bar and quick buttons (YouTube, Facebook, Instagram, TikTok, X, Vimeo...). Open any
   address, sign in, press **Save sign-in for <site>**. In **Cookies & sign-ins** select a site and press **View / delete cookies...**
   to inspect (values hidden until you tick *Show values*) or delete single cookies, **Remove site**, or **Remove everything**.
-* **Encrypted storage** - saved sign-ins are encrypted on disk (`cookies/*.cookies`). On Windows they use DPAPI: only your Windows account on this PC can open them, so a copied file is unreadable. On Linux a key file (owner-only) is used. A plain temporary cookies.txt is handed to yt-dlp only for a moment and then deleted. Old plain-text entries are encrypted automatically on the first start.
+* **Encrypted storage** - saved sign-ins are encrypted on disk (`cookies/*.cookies`). On Windows they use DPAPI: only your Windows account on this PC can open them, so a copied file is unreadable. A plain temporary cookies.txt is handed to yt-dlp only for a moment and then deleted. Old plain-text entries are encrypted automatically on the first start.
 * While a link is analysed or a preview file downloads, the preview shows a spinner (with a percentage when known), the tab says
   *Analyzing...* and the status bar shows a progress stripe while any download runs. **Clear** now also clears the video, timeline and clips.
 * Cookies are stored per site in `%APPDATA%\UniversalVideoStudio\cookies` and are sent **only to the site they belong to**
@@ -261,16 +235,16 @@ GitHub works the same way: use the raw link of `latest.json` in your repo (or a 
 automatically; the download page opens only when the user clicks.
 
 ## Building on GitHub (Actions)
-`.github/workflows/build.yml` builds the **Windows** app (zip + installer) and the **Linux** app (`.tar.gz`) on GitHub.
+`.github/workflows/build.yml` builds the **Windows** app (zip + installer) on GitHub.
 Actions tab > "Build apps" > Run workflow, or push a tag (`git tag v1.1.0 && git push --tags`) to also create one Release with
-all files (the `release` job waits for both builds). It uses Node-24-ready actions (checkout v5, setup-python v6, upload-artifact v5) and `build.bat` (which behaves
+all files . It uses Node-24-ready actions (checkout v5, setup-python v6, upload-artifact v5) and `build.bat` (which behaves
 non-interactively when `CI` is set).
 
 ### Updates through GitHub Releases (this project: `yuppost/universal-video-downloader`)
 `UPDATE_INFO_URL` is set to `github:yuppost/universal-video-downloader`, so the app asks GitHub for the repo's **latest Release**
 (the repository must be public). To publish an update:
-1. Change `__version__` in `app/__init__.py` (for example `1.1.0`), commit and push.
-2. `git tag v1.1.0` then `git push origin v1.1.0` - the "Build apps" workflow builds the Windows zip + installer and the Linux archive and creates the Release.
+1. Commit and push your changes (the version number comes from the tag; the workflow writes it into `app/__init__.py`).
+2. `git tag v1.1.0` then `git push origin v1.1.0` - the "Build apps" workflow builds the Windows zip + installer and creates the Release.
 3. Users of older versions see "Update 1.1.0 available" in the status bar; the button opens the Release page to download.
 The tag number must be higher than the version inside the user's app.
 

@@ -11,8 +11,6 @@ in the browser only when the user clicks it. No user data is sent (a plain GET r
 from __future__ import annotations
 
 import json
-import platform
-import sys
 import re
 import urllib.request
 from app.utils.net import urlopen as _net_urlopen
@@ -29,8 +27,6 @@ class UpdateInfo:
     asset_url: str = ""           # direct https link of the zip, enables the one-click update
     sha256: str = ""
     size: int = 0
-    deb_url: str = ""             # Linux: the .deb of this release (used when the app was installed from a .deb)
-    deb_sha256: str = ""
 
 
 def version_tuple(v: str) -> Tuple[int, ...]:
@@ -60,37 +56,15 @@ def resolve_source(source: str) -> str:
     return s
 
 
-def _arch_tag() -> str:
-    m = platform.machine().lower()
-    return "aarch64" if m in ("aarch64", "arm64") else "x86_64" if m in ("x86_64", "amd64") else m
-
-
 def _pick_asset(assets) -> dict:
-    """The release file for this OS: ``*windows*.zip`` on Windows, ``*linux*.tar.gz`` (matching CPU) on Linux."""
-    linux = sys.platform.startswith("linux")
-    ext, tag = ((".tar.gz", ".tgz"), "linux") if linux else ((".zip",), "windows")
-    items = [a for a in (assets or []) if isinstance(a, dict) and str(a.get("name", "")).lower().endswith(ext)]
-    arch, other = _arch_tag(), {"x86_64", "aarch64"}
-    if linux:                                           # never offer the other CPU's build
-        items = [a for a in items if not any(o in str(a.get("name", "")).lower() for o in other - {arch})]
-    items.sort(key=lambda a: (tag not in str(a.get("name", "")).lower(), str(a.get("name", ""))))
+    """The Windows release file: ``*windows*.zip``."""
+    items = [a for a in (assets or []) if isinstance(a, dict) and str(a.get("name", "")).lower().endswith(".zip")]
+    items.sort(key=lambda a: ("windows" not in str(a.get("name", "")).lower(), str(a.get("name", ""))))
     return items[0] if items else {}
-
-
-def _pick_deb(assets) -> dict:
-    arch, other = _arch_tag(), {"x86_64", "aarch64"}
-    items = [a for a in (assets or []) if isinstance(a, dict) and str(a.get("name", "")).lower().endswith(".deb")
-             and not any(o in str(a.get("name", "")).lower() for o in other - {arch})]
-    return items[0] if items else {}
-
-
-def _sha_of(asset: dict) -> str:
-    d = str(asset.get("digest", ""))
-    return d.split(":", 1)[-1] if d.startswith("sha256:") else ""
 
 
 def parse_info(raw: bytes) -> Optional[UpdateInfo]:
-    asset_url = sha = deb_url = deb_sha = ""
+    asset_url = sha = ""
     size = 0
     try:
         data = json.loads(raw.decode("utf-8-sig"))
@@ -101,10 +75,7 @@ def parse_info(raw: bytes) -> Optional[UpdateInfo]:
             url = str(data["html_url"]).strip()
             a = _pick_asset(data.get("assets"))
             asset_url = str(a.get("browser_download_url", ""))
-            sha = _sha_of(a)
-            if sys.platform.startswith("linux"):
-                d = _pick_deb(data.get("assets"))
-                deb_url, deb_sha = str(d.get("browser_download_url", "")), _sha_of(d)
+            sha = str(a.get("digest", "")).split(":", 1)[-1] if str(a.get("digest", "")).startswith("sha256:") else ""
             size = int(a.get("size") or 0)
             data = {"notes": data.get("body") or data.get("name") or ""}
         else:
@@ -118,11 +89,7 @@ def parse_info(raw: bytes) -> Optional[UpdateInfo]:
         asset_url = ""
     if sha and not re.fullmatch(r"[0-9a-fA-F]{64}", sha):
         sha = ""
-    if deb_url and urlsplit(deb_url).scheme.lower() != "https":
-        deb_url = ""
-    if deb_sha and not re.fullmatch(r"[0-9a-fA-F]{64}", deb_sha):
-        deb_sha = ""
-    return UpdateInfo(ver, url, str(data.get("notes", ""))[:2000], asset_url, sha.lower(), size, deb_url, deb_sha.lower())
+    return UpdateInfo(ver, url, str(data.get("notes", ""))[:2000], asset_url, sha.lower(), size)
 
 
 def check_update(source: str, current: str, timeout: int = 8) -> Tuple[str, Optional[UpdateInfo]]:

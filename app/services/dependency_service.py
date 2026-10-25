@@ -8,7 +8,6 @@ mode stays portable). Nothing is installed system-wide.
 from __future__ import annotations
 
 import hashlib
-import lzma
 import http.client
 import logging
 import os
@@ -17,7 +16,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tarfile
 import threading
 import time
 import urllib.request
@@ -36,21 +34,11 @@ from app.utils.paths import app_data_dir, human_size
 log = logging.getLogger("uvs.deps")
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
-def _linux_arch() -> str:
-    """Names used by the Linux download sites: ``amd64`` / ``arm64`` ("" = no automatic download for this CPU)."""
-    m = platform.machine().lower()
-    return "amd64" if m in ("x86_64", "amd64") else "arm64" if m in ("aarch64", "arm64") else ""
-
-
 def _deno_target() -> str:
-    m = platform.machine().lower()
-    arch = "x86_64" if m in ("x86_64", "amd64") else "aarch64" if m in ("aarch64", "arm64") else ""
-    if os.name == "nt":
-        return "x86_64-pc-windows-msvc"
-    return f"{arch}-unknown-linux-gnu" if arch and sys.platform.startswith("linux") else ""
+    return "x86_64-pc-windows-msvc" if os.name == "nt" else ""
 
 
-# (archive url, checksum url or None). Tried in order. Windows: .zip (SHA-256). Linux: static builds (.tar.xz, MD5 file).
+# (archive url, checksum url or None). Tried in order. .zip with a SHA-256 file.
 def default_ffmpeg_sources() -> List[Tuple[str, Optional[str]]]:
     if os.name == "nt":
         return [
@@ -59,23 +47,13 @@ def default_ffmpeg_sources() -> List[Tuple[str, Optional[str]]]:
             ("https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
              "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/checksums.sha256"),
         ]
-    arch = _linux_arch() if sys.platform.startswith("linux") else ""
-    if not arch:
-        return []
-    base = "https://johnvansickle.com/ffmpeg/releases"
-    gh = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest"
-    btbn = "linux64" if arch == "amd64" else "linuxarm64"
-    return [   # johnvansickle.com is sometimes slow or refuses downloads -> GitHub build as the second source
-        (f"{base}/ffmpeg-release-{arch}-static.tar.xz", f"{base}/ffmpeg-release-{arch}-static.tar.xz.md5"),
-        (f"{gh}/ffmpeg-master-latest-{btbn}-gpl.tar.xz", f"{gh}/checksums.sha256"),
-    ]
+    return []
 
 
 FFMPEG_SOURCES: List[Tuple[str, Optional[str]]] = default_ffmpeg_sources()
 
 # Where the newest released version number can be read (plain text / JSON, a few bytes).
-FFMPEG_VERSION_URL = ("https://www.gyan.dev/ffmpeg/builds/release-version" if os.name == "nt"
-                      else "https://johnvansickle.com/ffmpeg/release-readme.txt")
+FFMPEG_VERSION_URL = "https://www.gyan.dev/ffmpeg/builds/release-version"
 DENO_LATEST_URL = "https://api.github.com/repos/denoland/deno/releases/latest"
 
 # percent (None = unknown), message, bytes/s
@@ -163,48 +141,9 @@ def download_file(url: str, dest: Path, progress: Optional[Progress], cancel: th
         dest.unlink(missing_ok=True)
         if getattr(exc, "errno", None) == 28:
             raise FriendlyError("The disk is full. Free up space and try again.") from exc
-        log.warning("urllib download failed (%s): %s", url, exc)
-        if _curl_download(url, dest, cancel):                 # Linux: the system's curl/wget as a second way in
-            return dest
+        log.warning("download failed (%s): %s", url, exc)
         raise FriendlyError("Download failed. Check your internet connection and try again.", f"{url.split('/')[2]}: {exc}") from exc
     return dest
-
-
-def _curl_download(url: str, dest: Path, cancel: threading.Event) -> bool:
-    """Last resort on Linux when Python's own HTTPS fails (certificates, proxy, TLS quirks). True when *dest* was written."""
-    if not sys.platform.startswith("linux") or not url.lower().startswith("https://"):
-        return False
-    from app.services.self_update import clean_env
-    for tool, args in (("curl", ["curl", "-fL", "--retry", "2", "--connect-timeout", "20", "-o", str(dest), url]),
-                       ("wget", ["wget", "-q", "-O", str(dest), url])):
-        if not shutil.which(tool) or cancel.is_set():
-            continue
-        try:
-            r = subprocess.run(args, capture_output=True, timeout=1800, env=clean_env())
-            if r.returncode == 0 and dest.is_file() and dest.stat().st_size > 0:
-                return True
-            log.warning("%s download failed (%s): %s", tool, r.returncode, r.stderr[-200:])
-        except (OSError, subprocess.SubprocessError) as exc:
-            log.warning("%s could not run: %s", tool, exc)
-        dest.unlink(missing_ok=True)
-    return False
-
-
-def _apt_install_ffmpeg(progress: Progress, cancel: threading.Event) -> Optional[Path]:
-    """Linux last resort: install the distribution's ffmpeg with apt (the system asks for the password)."""
-    if not (sys.platform.startswith("linux") and shutil.which("pkexec") and shutil.which("apt-get")):
-        return None
-    progress(None, "Download failed - installing FFmpeg with apt (your administrator password is needed)...", None)
-    try:
-        r = subprocess.run(["pkexec", "apt-get", "install", "-y", "ffmpeg"], capture_output=True, timeout=1800,
-                           env=dict(os.environ, DEBIAN_FRONTEND="noninteractive"), stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    exe = shutil.which("ffmpeg")
-    if r.returncode == 0 and exe:
-        progress(100.0, "FFmpeg installed", None)
-        return Path(exe).parent
-    return None
 
 
 def _expected_sha256(sha_url: Optional[str], filename: str, cancel: threading.Event) -> Optional[str]:
@@ -255,29 +194,6 @@ def _verify_download(path: Path, sha_url: Optional[str], url: str) -> None:
         raise FriendlyError("The downloaded file failed its integrity check (checksum mismatch).")
 
 
-def extract_ffmpeg_tar(archive: Path, dest_dir: Path) -> None:
-    """Extract only ffmpeg and ffprobe (from a .tar.xz/.tar.gz of static builds) into *dest_dir*, by basename."""
-    wanted = {"ffmpeg", "ffprobe"}
-    found = set()
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(archive, "r:*") as t:
-        for m in t:
-            name = Path(m.name)
-            if not m.isfile() or name.name not in wanted or name.name in found or name.is_absolute() or ".." in name.parts:
-                continue
-            src = t.extractfile(m)
-            if src is None:
-                continue
-            target = dest_dir / name.name
-            with src, open(str(target) + ".new", "wb") as out:
-                shutil.copyfileobj(src, out)
-            os.replace(str(target) + ".new", target)
-            target.chmod(0o755)
-            found.add(name.name)
-    if found != wanted:
-        raise FriendlyError("The downloaded archive did not contain ffmpeg and ffprobe.")
-
-
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -316,25 +232,21 @@ def install_ffmpeg(progress: Progress, cancel: threading.Event,
     sources = sources if sources is not None else default_ffmpeg_sources()
     if not sources:
         raise FriendlyError("Automatic FFmpeg download is not available for this system. "
-                            "Install it with your package manager (for example: sudo apt install ffmpeg).")
+                            "Install FFmpeg yourself and put it in the app's ffmpeg folder.")
     dest_dir = dest_dir or managed_ffmpeg_dir()
     tmp_dir = dest_dir.parent / "download"
     shutil.rmtree(tmp_dir, ignore_errors=True)
     last_error: Optional[FriendlyError] = None
     reasons: List[str] = []
     for url, sha_url in sources:
-        is_tar = url.lower().endswith((".tar.xz", ".tar.gz", ".tgz"))
-        zpath = tmp_dir / ("ffmpeg.tar.xz" if is_tar else "ffmpeg.zip")
+        zpath = tmp_dir / "ffmpeg.zip"
         try:
             progress(None, "Connecting...", None)
             download_file(url, zpath, progress, cancel, allow_http, "Downloading FFmpeg")
             progress(None, "Verifying download...", None)
             _verify_download(zpath, sha_url, url)
             progress(None, "Unpacking...", None)
-            if is_tar:
-                extract_ffmpeg_tar(zpath, dest_dir)
-            else:
-                extract_ffmpeg(zpath, dest_dir)
+            extract_ffmpeg(zpath, dest_dir)
             exe = dest_dir / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
             try:
                 res = subprocess.run([str(exe), "-version"], capture_output=True, timeout=30, creationflags=_NO_WINDOW)
@@ -349,21 +261,13 @@ def install_ffmpeg(progress: Progress, cancel: threading.Event,
             log.warning("FFmpeg source failed: %s (%s) %s", exc.message, exc.details, url)
             last_error = exc
             reasons.append(f"{url.split('/')[2]}: {exc.message} {exc.details or ''}".strip())
-        except (zipfile.BadZipFile, tarfile.TarError, EOFError, lzma.LZMAError):
+        except (zipfile.BadZipFile, EOFError):
             last_error = FriendlyError("The downloaded file is not a valid archive.")
         finally:
             zpath.unlink(missing_ok=True)
     shutil.rmtree(tmp_dir, ignore_errors=True)
-    apt = _apt_install_ffmpeg(progress, cancel) if not (cancel.is_set() or allow_http) else None
-    if apt:
-        return apt
     if last_error and len(reasons) > 1:
-        hint = ""
-        if sys.platform.startswith("linux"):
-            hint = (" Or install it yourself: sudo apt install ffmpeg"
-                    f"  -  or download {sources[-1][0]} , unpack it and copy the files 'ffmpeg' and 'ffprobe' into "
-                    f"{managed_ffmpeg_dir()}")
-        raise FriendlyError(last_error.message + hint, " | ".join(reasons)[:600])
+        raise FriendlyError(last_error.message, " | ".join(reasons)[:600])
     raise last_error or FriendlyError("FFmpeg could not be downloaded.")
 
 
@@ -464,7 +368,7 @@ def _fetch_text(url: str, timeout: float = 10, allow_http: bool = False) -> Opti
 
 
 def latest_ffmpeg_version(url: str = FFMPEG_VERSION_URL, allow_http: bool = False) -> Optional[str]:
-    """Newest release number: gyan.dev's one-line file (Windows) or ``version: x.y.z`` in the Linux builds' readme."""
+    """Newest release number: gyan.dev's one-line file."""
     text = _fetch_text(url, allow_http=allow_http)
     if not text or not text.strip():
         return None
