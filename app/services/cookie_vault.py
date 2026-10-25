@@ -1,11 +1,11 @@
 """Cookie vault: sign-in cookies collected per site, used automatically by yt-dlp.
 
-* Each site has one *entry* (``cookies/<id>.txt`` in Netscape format + a line in ``cookies/index.json``).
+* Each site has one *entry* (``cookies/<id>.cookies`` = Netscape text, **encrypted** by ``secure_store``, + a line
+  in ``cookies/index.json`` that holds no cookie values).
 * ``cookiefile_for(url)`` writes a temporary file holding only the cookies of the site that *url* belongs to,
   so a YouTube download never sends Facebook cookies and vice versa.
-* Values are never logged or shown. Files are created with owner-only permissions where the OS supports it.
-  They live in the app's data folder (``%APPDATA%\\UniversalVideoStudio\\cookies``); anyone with access to your
-  Windows account can read them, exactly like the cookie store of a browser - remove an entry to delete it.
+* Values are never logged or shown. On Windows the files are DPAPI-encrypted (only your Windows account on this PC can
+  open them); a plain cookies.txt exists only for a moment while yt-dlp starts and is then deleted.
 """
 
 from __future__ import annotations
@@ -135,7 +135,7 @@ def login_url_for(url_or_host: str) -> str:
 _FORBIDDEN = re.compile(r"[\t\r\n]")
 
 
-def write_netscape(path: Path, cookies: Iterable[CookieRec]) -> int:
+def dumps_netscape(cookies: Iterable[CookieRec]) -> Tuple[str, int]:
     lines = ["# Netscape HTTP Cookie File", "# Written by Universal Video Studio. Keep this file private.", ""]
     n = 0
     for c in cookies:
@@ -147,18 +147,33 @@ def write_netscape(path: Path, cookies: Iterable[CookieRec]) -> int:
         lines.append("\t".join([prefix + c.domain, sub, c.path or "/", "TRUE" if c.secure else "FALSE",
                                 str(int(exp)), c.name, c.value]))
         n += 1
+    return "\n".join(lines) + "\n", n
+
+
+def _write_private(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0), 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write("\n".join(lines) + "\n")
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(data)
+
+
+def write_netscape(path: Path, cookies: Iterable[CookieRec]) -> int:
+    """Plain cookies.txt (what yt-dlp needs / what users export). The vault itself stores encrypted files."""
+    text, n = dumps_netscape(cookies)
+    _write_private(path, text.encode("utf-8"))
     return n
 
 
 def read_netscape(path: Path) -> List[CookieRec]:
     """Tolerant cookies.txt reader (also understands ``#HttpOnly_`` lines)."""
-    out: List[CookieRec] = []
     with open(path, "r", encoding="utf-8", errors="replace") as fh:
-        for raw in fh:
+        return loads_netscape(fh.read())
+
+
+def loads_netscape(text: str) -> List[CookieRec]:
+    out: List[CookieRec] = []
+    if text:
+        for raw in text.splitlines():
             line = raw.rstrip("\r\n")
             http_only = False
             if line.startswith("#HttpOnly_"):
@@ -221,7 +236,10 @@ class CookieVault:
         self.root = Path(root)
         self._lock = threading.RLock()
         self.root.mkdir(parents=True, exist_ok=True)
+        self._migrate_legacy()
         self.clean_runtime()
+        import atexit
+        atexit.register(self.clean_runtime)
 
     # --- index
     @property
@@ -241,7 +259,40 @@ class CookieVault:
         os.replace(tmp, self._index)
 
     def _file(self, entry_id: str) -> Path:
-        return self.root / f"{entry_id}.txt"
+        return self.root / f"{entry_id}.cookies"
+
+    def _read_entry(self, entry_id: str) -> List[CookieRec]:
+        from app.services import secure_store
+        blob = self._file(entry_id).read_bytes()
+        try:
+            text = secure_store.unprotect(blob, self.root).decode("utf-8", "replace")
+        except secure_store.SecureStoreError as exc:
+            log.warning("cookie vault: %s", exc)
+            raise OSError(str(exc)) from exc
+        return loads_netscape(text)
+
+    def _store_entry(self, entry_id: str, cookies: List[CookieRec]) -> int:
+        from app.services import secure_store
+        text, n = dumps_netscape(cookies)
+        data = text.encode("utf-8")
+        try:
+            data = secure_store.protect(data, self.root)
+        except secure_store.SecureStoreError as exc:      # never lose the sign-in because encryption is unavailable
+            log.warning("cookie vault: saving UNENCRYPTED (%s)", exc)
+        _write_private(self._file(entry_id), data)
+        return n
+
+    def _migrate_legacy(self) -> None:
+        """Older versions kept <id>.txt in plain text: encrypt it once and delete the plain file."""
+        for old in self.root.glob("*.txt"):
+            try:
+                recs = read_netscape(old)
+                if recs:
+                    self._store_entry(old.stem, recs)
+                    log.info("cookie vault: encrypted legacy entry %s", old.stem)
+                old.unlink()
+            except Exception:  # noqa: BLE001 - leave the file; try again next start
+                log.warning("cookie vault: could not migrate %s", old.name)
 
     @staticmethod
     def _entry_id(key: str) -> str:
@@ -259,7 +310,7 @@ class CookieVault:
             signed = d.get("signed_in")
             if site in LOGIN_COOKIES:                      # recomputed from the file (older entries lack it)
                 try:
-                    signed = login_state(site, (c.name for c in read_netscape(self._file(eid))))
+                    signed = login_state(site, (c.name for c in self._read_entry(eid)))
                 except OSError:
                     pass
             out.append(VaultEntry(eid, site, d.get("label", eid), d.get("source", ""),
@@ -279,7 +330,7 @@ class CookieVault:
 
     def cookies(self, entry_id: str) -> List[CookieRec]:
         try:
-            return read_netscape(self._file(entry_id))
+            return self._read_entry(entry_id)
         except OSError:
             return []
 
@@ -296,7 +347,7 @@ class CookieVault:
 
     def _write_entry(self, eid: str, key: str, kept: List[CookieRec], source: str, label: str) -> None:
         with self._lock:
-            n = write_netscape(self._file(eid), kept)
+            n = self._store_entry(eid, kept)
             persistent = [c.expires for c in kept if c.expires > 0]
             names = {c.name for c in kept}
             idx = self._load_index()
@@ -356,16 +407,21 @@ class CookieVault:
             return None
         run = self.root / "_run"
         run.mkdir(exist_ok=True)
+        self.clean_runtime(older_than=120)          # earlier temp files (yt-dlp has long since read them)
         fd, name = tempfile.mkstemp(prefix=f"{e.id}-", suffix=".txt", dir=run)
         os.close(fd)
         write_netscape(Path(name), recs)
         return Path(name)
 
-    def clean_runtime(self) -> None:
+    def clean_runtime(self, older_than: float = 0) -> None:
+        """Delete the short-lived plain cookies.txt copies handed to yt-dlp."""
         run = self.root / "_run"
         if run.is_dir():
+            now = time.time()
             for f in run.glob("*.txt"):
                 try:
+                    if older_than and now - f.stat().st_mtime < older_than:
+                        continue
                     f.unlink()
                 except OSError:
                     pass

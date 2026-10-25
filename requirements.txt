@@ -5,3 +5,4 @@
 #   pip install --upgrade yt-dlp
 PySide6>=6.8,<7
 yt-dlp[default,curl-cffi]>=2025.1.1
+cryptography>=42; sys_platform != "win32"   # encrypts saved sign-in cookies (Windows uses built-in DPAPI)

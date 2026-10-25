@@ -1,4 +1,5 @@
 """Cookie vault, site matching, yt-dlp cookie selection and sign-in error hints (no network)."""
+import sys
 import os
 import time
 
@@ -76,7 +77,7 @@ def test_save_list_replace_and_remove(vault):
     e2 = vault.entries()[0]
     assert e2.count == 1 and e2.signed_in is False and e2.source == "file"
     vault.remove("youtube.com")
-    assert vault.entries() == [] and not (vault.root / "youtube.com.txt").exists()
+    assert vault.entries() == [] and not (vault.root / "youtube.com.cookies").exists()
 
 
 def test_save_without_matching_cookies_is_an_error(vault):
@@ -218,7 +219,7 @@ def test_delete_single_cookies_updates_index_and_removes_empty_entry(vault):
     assert n == 1 and e.count == 2 and e.signed_in is True                       # LOGIN_INFO still counts as signed in
     assert vault.delete_cookies("youtube.com", [(".youtube.com", "/", "SID")]) == 0
     vault.delete_cookies("youtube.com", [(".youtube.com", "/", "PREF"), (".google.com", "/", "LOGIN_INFO")])
-    assert vault.entries() == [] and not (vault.root / "youtube.com.txt").exists()
+    assert vault.entries() == [] and not (vault.root / "youtube.com.cookies").exists()
 
 
 # ---- link normalising, login detection, browser restore ------------------------------------
@@ -261,7 +262,8 @@ def test_vault_entry_reports_login(tmp_path):
     assert v.save("facebook.com", fb, "t").signed_in is False
     fb += [cv.CookieRec(".facebook.com", "/", "c_user", "1"), cv.CookieRec(".facebook.com", "/", "xs", "2", True, 0, True)]
     assert v.save("facebook.com", fb, "t").signed_in is True
-    raw = (tmp_path / "c" / "facebook.com.txt").read_bytes()
+    from app.services import secure_store
+    raw = secure_store.unprotect((tmp_path / "c" / "facebook.com.cookies").read_bytes(), tmp_path / "c")
     assert b"\r" not in raw                                         # never CRLF (would corrupt the last field)
 
 
@@ -357,3 +359,41 @@ def test_duration_stated_in_facebook_page():
     assert d('"length_in_second":12.5', "") == 12.5
     assert d('mediaPresentationDuration=\\"PT1M31.5S\\"', "") == 91.5
     assert d("nothing here", "1") is None
+
+
+# ---- encryption at rest ----------------------------------------------------------
+def test_cookies_are_encrypted_on_disk_and_roundtrip(tmp_path):
+    v = cv.CookieVault(tmp_path / "c")
+    v.save("youtube.com", [rec(".youtube.com", "SID", "SECRET-VALUE-123")], "t")
+    raw = (tmp_path / "c" / "youtube.com.cookies").read_bytes()
+    assert b"SECRET-VALUE-123" not in raw and b"SID" not in raw and b"youtube" not in raw
+    assert [c.value for c in v.cookies("youtube.com")] == ["SECRET-VALUE-123"]
+    assert not list((tmp_path / "c").glob("*.txt"))
+
+
+def test_legacy_plain_text_entries_are_migrated_and_deleted(tmp_path):
+    root = tmp_path / "c"
+    root.mkdir()
+    cv.write_netscape(root / "youtube.com.txt", [rec(".youtube.com", "SID", "OLD-SECRET")])
+    (root / "index.json").write_text('{"youtube.com": {"site": "youtube.com", "label": "YouTube", "count": 1}}')
+    v = cv.CookieVault(root)
+    assert not (root / "youtube.com.txt").exists()
+    assert b"OLD-SECRET" not in (root / "youtube.com.cookies").read_bytes()
+    assert v.cookies("youtube.com")[0].value == "OLD-SECRET"
+
+
+def test_temp_cookie_file_for_ytdlp_is_plain_but_swept(tmp_path):
+    v = cv.CookieVault(tmp_path / "c")
+    v.save("youtube.com", [rec(".youtube.com", "SID", "VAL")], "t")
+    f = v.cookiefile_for("https://www.youtube.com/watch?v=1")
+    assert f and b"VAL" in f.read_bytes()
+    v.clean_runtime()
+    assert not f.exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows uses DPAPI, there is no key file")
+def test_wrong_key_is_reported_not_crashing(tmp_path):
+    v = cv.CookieVault(tmp_path / "c")
+    v.save("youtube.com", [rec(".youtube.com", "SID")], "t")
+    (tmp_path / "c" / ".key").unlink()                        # key lost -> new key -> old data unreadable
+    assert v.cookies("youtube.com") == []

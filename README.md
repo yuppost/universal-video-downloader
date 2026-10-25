@@ -48,7 +48,7 @@ and downloads in `~/Videos/UniversalVideoStudio/Video` (MP3: `.../Audio`). FFmpe
 One-click updates work because the install folder is writable. On a bare Debian/Ubuntu desktop the Qt libraries may need:
 `sudo apt install libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libnss3 libasound2`.
 
-**From source:** `./run.sh` (creates `.venv`, installs `requirements.txt`, starts the app). **Build:** `./build.sh` runs the
+**From source:** `sh run.sh` (creates `.venv`, installs `requirements.txt`, starts the app). **Build:** `sh build.sh` runs the
 tests, builds with PyInstaller and writes `UniversalVideoStudio-linux-<cpu>.tar.gz` (the GitHub workflow does this on Ubuntu 22.04
 so it runs on most distributions). Linux uses the system's `xdg-open` for "open folder" and needs an NVIDIA driver (nvidia-smi)
 only if you want GPU encoding.
@@ -94,6 +94,7 @@ yt-dlp installs through pip into the app's own `.venv`; in a packaged build yt-d
 * **Any website**: the browser window has an address bar and quick buttons (YouTube, Facebook, Instagram, TikTok, X, Vimeo...). Open any
   address, sign in, press **Save sign-in for <site>**. In **Cookies & sign-ins** select a site and press **View / delete cookies...**
   to inspect (values hidden until you tick *Show values*) or delete single cookies, **Remove site**, or **Remove everything**.
+* **Encrypted storage** - saved sign-ins are encrypted on disk (`cookies/*.cookies`). On Windows they use DPAPI: only your Windows account on this PC can open them, so a copied file is unreadable. On Linux a key file (owner-only) is used. A plain temporary cookies.txt is handed to yt-dlp only for a moment and then deleted. Old plain-text entries are encrypted automatically on the first start.
 * While a link is analysed or a preview file downloads, the preview shows a spinner (with a percentage when known), the tab says
   *Analyzing...* and the status bar shows a progress stripe while any download runs. **Clear** now also clears the video, timeline and clips.
 * Cookies are stored per site in `%APPDATA%\UniversalVideoStudio\cookies` and are sent **only to the site they belong to**
@@ -277,114 +278,8 @@ files over the app folder and starts the app again. `data\` and `portable.flag` 
 are stored in `%APPDATA%` and stay. The log of the last update is `%TEMP%\UVS-update\update.log`. If the folder is not writable
 (for example under `C:\Program Files`) the app only opens the download page.
 
-<<<<<<< HEAD
-### The Application Does Not Start
-
-- Check the included installation instructions.
-- Confirm that the required dependencies are installed.
-- Review any error messages or application logs.
-- If the issue persists, open a GitHub issue with the relevant error details.
-
-Do not include passwords, cookies, session tokens, or other private information in bug reports.
-
-## Known Limitations
-
-- Website compatibility depends on yt-dlp and changes made by individual websites.
-- Some sources require authentication or may not be accessible.
-- Available download formats and quality options vary by source.
-- GPU encoding depends on hardware, drivers, and the installed FFmpeg build.
-- Cropping requires re-encoding.
-- Exact behavior and available options may vary by application version.
-
-## Contributing
-
-Contributions, bug reports, and suggestions are welcome.
-
-Before submitting a contribution:
-
-1. Check existing issues to avoid duplicates.
-2. Describe the problem or proposed improvement clearly.
-3. Include reproducible steps for bugs where possible.
-4. Avoid sharing credentials, cookies, or private account information.
-5. Ensure your contribution respects the project's license and the licenses of third-party components.
-
-To report an issue, visit:
-
-https://github.com/yuppost/universal-video-downloader/issues
-
-## Development and Testing
-
-If you are contributing code:
-
-- Use a compatible Python environment.
-- Follow the existing project structure and coding conventions.
-- Install the project's documented development dependencies.
-- Run the available tests and relevant manual checks before submitting changes.
-
-Test commands and development requirements should be documented alongside the project's source code.
-
-## License
-
-<<<<<<< HEAD
-Universal Video Studio is licensed under the Apache License, Version 2.0. See the [LICENSE](LICENSE) file for the complete license text.
-
-You may use, reproduce, modify, distribute, sublicense, and sell copies of the project under the terms of the Apache License 2.0. Redistribution must comply with the license requirements, including retaining applicable copyright, patent, trademark, and attribution notices and providing a copy of the license.
-
-This license applies to the original project code covered by the project's copyright. Third-party tools, libraries, and bundled components remain subject to their respective licenses and terms.
-=======
-Universal Video Studio is licensed under the MIT License. See the [LICENSE](LICENSE) file for the complete license text.
-
-The MIT License permits use, copying, modification, distribution, sublicensing, and sale of copies of the project, provided that the required copyright and license notices are retained.
-
-This license applies to the original project code covered by the project's copyright. Third-party tools, libraries, and bundled components remain subject to their own licenses and terms.
->>>>>>> e991dec (img)
-
-## Third-Party Licenses
-
-Universal Video Studio may use or interact with third-party software, including:
-
-- **Python** — Python Software Foundation License.
-<<<<<<< HEAD
-- **yt-dlp** — Unlicense, subject to applicable notices and third-party component licenses.
-=======
-- **yt-dlp** — Unlicense, with applicable notices and third-party component licenses.
->>>>>>> e991dec (img)
-- **FFmpeg** — Licensing depends on the specific build and enabled components; LGPL or GPL terms may apply.
-- **Deno** — MIT License.
-- **Other dependencies** — Subject to their respective licenses.
-
-<<<<<<< HEAD
-Check the official project documentation and license files for the versions and builds you use. When distributing a packaged application, include required notices and comply with all applicable license conditions.
-=======
-Check the official project documentation and license files for the versions and builds you use. If distributing a packaged application, include required notices and comply with all applicable license conditions.
->>>>>>> e991dec (img)
-
-Official resources:
-
-- Python: https://www.python.org/
-- yt-dlp: https://github.com/yt-dlp/yt-dlp
-- FFmpeg legal information: https://ffmpeg.org/legal.html
-- Deno: https://deno.com/
-
-## Disclaimer
-
-<<<<<<< HEAD
-This software is provided "as is", without warranty of any kind, express or implied. See the Apache License 2.0 in the [LICENSE](LICENSE) file for the full warranty disclaimer and limitation of liability.
-=======
-This software is provided "as is", without warranty of any kind, express or implied. See the MIT License for the full warranty disclaimer and limitation of liability.
->>>>>>> e991dec (img)
-
-Universal Video Studio is not affiliated with, endorsed by, or officially connected to the websites supported by yt-dlp unless explicitly stated.
-
----
-
-**Repository:** https://github.com/yuppost/universal-video-downloader
-
-**Issues and feature requests:** https://github.com/yuppost/universal-video-downloader/issues
-=======
 ## Installer
 The workflow also builds `UniversalVideoStudio-Setup-<version>.exe` with Inno Setup (`installer/UniversalVideoStudio.iss`): a per-user
 install into `%LOCALAPPDATA%\Programs\UniversalVideoStudio` (no administrator rights, so the one-click updater keeps working),
 Start-menu entry, optional desktop shortcut, uninstaller. Uninstalling keeps your settings and sign-ins in `%APPDATA%`.
 Locally: `build.bat`, then `iscc /DAppVersion=1.0.0 installer\UniversalVideoStudio.iss`.
->>>>>>> f9fa6b5 (linux + update)

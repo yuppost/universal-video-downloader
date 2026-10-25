@@ -18,6 +18,7 @@ import shutil
 import sys
 import threading
 import urllib.request
+from app.utils.net import urlopen as _net_urlopen
 import zipfile
 from pathlib import Path
 from typing import Callable, Optional, Tuple
@@ -91,7 +92,7 @@ def _latest_wheel(url: str = PYPI_JSON) -> Tuple[str, str, str]:
     """(version, wheel_url, sha256) of the newest yt-dlp release."""
     req = urllib.request.Request(url, headers={"User-Agent": "UniversalVideoStudio"})
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:  # noqa: S310 - fixed https URL
+        with _net_urlopen(req, timeout=30) as r:  # noqa: S310 - fixed https URL
             data = json.loads(r.read(5_000_000))
     except Exception as exc:  # noqa: BLE001
         raise FriendlyError("Could not reach PyPI to check for a yt-dlp update. Check your internet connection.",

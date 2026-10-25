@@ -15,6 +15,7 @@ import platform
 import sys
 import re
 import urllib.request
+from app.utils.net import urlopen as _net_urlopen
 from dataclasses import dataclass
 from typing import Optional, Tuple
 from urllib.parse import urlsplit
@@ -112,7 +113,7 @@ def check_update(source: str, current: str, timeout: int = 8) -> Tuple[str, Opti
         return "error", None
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "UniversalVideoStudio"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310 - https only, checked above
+        with _net_urlopen(req, timeout=timeout) as r:  # noqa: S310 - https only, checked above
             raw = r.read(300_000)
     except Exception:  # noqa: BLE001 - an update check must never disturb the app
         return "error", None

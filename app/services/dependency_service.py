@@ -8,6 +8,8 @@ mode stays portable). Nothing is installed system-wide.
 from __future__ import annotations
 
 import hashlib
+import lzma
+import http.client
 import logging
 import os
 import platform
@@ -19,6 +21,7 @@ import tarfile
 import threading
 import time
 import urllib.request
+from app.utils.net import urlopen as _net_urlopen
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,7 +63,12 @@ def default_ffmpeg_sources() -> List[Tuple[str, Optional[str]]]:
     if not arch:
         return []
     base = "https://johnvansickle.com/ffmpeg/releases"
-    return [(f"{base}/ffmpeg-release-{arch}-static.tar.xz", f"{base}/ffmpeg-release-{arch}-static.tar.xz.md5")]
+    gh = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest"
+    btbn = "linux64" if arch == "amd64" else "linuxarm64"
+    return [   # johnvansickle.com is sometimes slow or refuses downloads -> GitHub build as the second source
+        (f"{base}/ffmpeg-release-{arch}-static.tar.xz", f"{base}/ffmpeg-release-{arch}-static.tar.xz.md5"),
+        (f"{gh}/ffmpeg-master-latest-{btbn}-gpl.tar.xz", f"{gh}/checksums.sha256"),
+    ]
 
 
 FFMPEG_SOURCES: List[Tuple[str, Optional[str]]] = default_ffmpeg_sources()
@@ -131,7 +139,7 @@ def download_file(url: str, dest: Path, progress: Optional[Progress], cancel: th
     dest.parent.mkdir(parents=True, exist_ok=True)
     req = urllib.request.Request(url, headers={"User-Agent": "UniversalVideoStudio"})
     try:
-        with urllib.request.urlopen(req, timeout=30) as r, open(dest, "wb") as out:  # noqa: S310 - scheme checked
+        with _net_urlopen(req, timeout=30) as r, open(dest, "wb") as out:  # noqa: S310 - scheme checked
             total = int(r.headers.get("Content-Length") or 0) or None
             done, t0, last = 0, time.monotonic(), 0.0
             while True:
@@ -151,7 +159,7 @@ def download_file(url: str, dest: Path, progress: Optional[Progress], cancel: th
     except OperationCanceled:
         dest.unlink(missing_ok=True)
         raise
-    except OSError as exc:
+    except (OSError, http.client.HTTPException) as exc:
         dest.unlink(missing_ok=True)
         if getattr(exc, "errno", None) == 28:
             raise FriendlyError("The disk is full. Free up space and try again.") from exc
@@ -164,7 +172,7 @@ def _expected_sha256(sha_url: Optional[str], filename: str, cancel: threading.Ev
         return None
     try:
         req = urllib.request.Request(sha_url, headers={"User-Agent": "UniversalVideoStudio"})
-        with urllib.request.urlopen(req, timeout=20) as r:  # noqa: S310 - https fixed constants
+        with _net_urlopen(req, timeout=20) as r:  # noqa: S310 - https fixed constants
             text = r.read(2_000_000).decode("utf-8", "replace")
     except OSError:
         return None
@@ -181,7 +189,7 @@ def _expected_digest(sha_url: Optional[str], filename: str) -> Optional[Tuple[st
         return None
     try:
         req = urllib.request.Request(sha_url, headers={"User-Agent": "UniversalVideoStudio"})
-        with urllib.request.urlopen(req, timeout=20) as r:  # noqa: S310 - https fixed constants
+        with _net_urlopen(req, timeout=20) as r:  # noqa: S310 - https fixed constants
             text = r.read(2_000_000).decode("utf-8", "replace")
     except OSError:
         return None
@@ -273,6 +281,7 @@ def install_ffmpeg(progress: Progress, cancel: threading.Event,
     tmp_dir = dest_dir.parent / "download"
     shutil.rmtree(tmp_dir, ignore_errors=True)
     last_error: Optional[FriendlyError] = None
+    reasons: List[str] = []
     for url, sha_url in sources:
         is_tar = url.lower().endswith((".tar.xz", ".tar.gz", ".tgz"))
         zpath = tmp_dir / ("ffmpeg.tar.xz" if is_tar else "ffmpeg.zip")
@@ -297,13 +306,17 @@ def install_ffmpeg(progress: Progress, cancel: threading.Event,
             progress(100.0, "FFmpeg installed", None)
             return dest_dir
         except FriendlyError as exc:
-            log.warning("FFmpeg source failed: %s", exc.message)
+            log.warning("FFmpeg source failed: %s (%s) %s", exc.message, exc.details, url)
             last_error = exc
-        except (zipfile.BadZipFile, tarfile.TarError, EOFError):
+            reasons.append(f"{url.split('/')[2]}: {exc.message} {exc.details or ''}".strip())
+        except (zipfile.BadZipFile, tarfile.TarError, EOFError, lzma.LZMAError):
             last_error = FriendlyError("The downloaded file is not a valid archive.")
         finally:
             zpath.unlink(missing_ok=True)
     shutil.rmtree(tmp_dir, ignore_errors=True)
+    if last_error and len(reasons) > 1:
+        hint = (" Or install it yourself: sudo apt install ffmpeg" if sys.platform.startswith("linux") else "")
+        raise FriendlyError(last_error.message + hint, " | ".join(reasons)[:600])
     raise last_error or FriendlyError("FFmpeg could not be downloaded.")
 
 
@@ -397,7 +410,7 @@ def _fetch_text(url: str, timeout: float = 10, allow_http: bool = False) -> Opti
         return None
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "UniversalVideoStudio", "Accept": "application/json, text/plain"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310 - https constants / tests use http
+        with _net_urlopen(req, timeout=timeout) as r:  # noqa: S310 - https constants / tests use http
             return r.read(500_000).decode("utf-8", "replace")
     except (OSError, ValueError):
         return None

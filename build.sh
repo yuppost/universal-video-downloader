@@ -24,7 +24,7 @@ grep -Eq "[0-9]+ passed" "$TESTLOG" || { echo "Tests did not finish - build abor
 unset QT_QPA_PLATFORM
 
 $VPY -m PyInstaller --noconfirm --clean --windowed --name UniversalVideoStudio \
-  --collect-submodules yt_dlp --collect-data yt_dlp --copy-metadata yt-dlp --collect-all curl_cffi --collect-all certifi \
+  --collect-submodules yt_dlp --hidden-import cryptography.fernet --hidden-import lzma --collect-data yt_dlp --copy-metadata yt-dlp --collect-all curl_cffi --collect-all certifi \
   --collect-submodules PySide6.QtMultimedia \
   --hidden-import PySide6.QtWebEngineWidgets --hidden-import PySide6.QtWebEngineCore \
   main.py
