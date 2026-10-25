@@ -163,8 +163,48 @@ def download_file(url: str, dest: Path, progress: Optional[Progress], cancel: th
         dest.unlink(missing_ok=True)
         if getattr(exc, "errno", None) == 28:
             raise FriendlyError("The disk is full. Free up space and try again.") from exc
-        raise FriendlyError("Download failed. Check your internet connection and try again.", str(exc)) from exc
+        log.warning("urllib download failed (%s): %s", url, exc)
+        if _curl_download(url, dest, cancel):                 # Linux: the system's curl/wget as a second way in
+            return dest
+        raise FriendlyError("Download failed. Check your internet connection and try again.", f"{url.split('/')[2]}: {exc}") from exc
     return dest
+
+
+def _curl_download(url: str, dest: Path, cancel: threading.Event) -> bool:
+    """Last resort on Linux when Python's own HTTPS fails (certificates, proxy, TLS quirks). True when *dest* was written."""
+    if not sys.platform.startswith("linux") or not url.lower().startswith("https://"):
+        return False
+    from app.services.self_update import clean_env
+    for tool, args in (("curl", ["curl", "-fL", "--retry", "2", "--connect-timeout", "20", "-o", str(dest), url]),
+                       ("wget", ["wget", "-q", "-O", str(dest), url])):
+        if not shutil.which(tool) or cancel.is_set():
+            continue
+        try:
+            r = subprocess.run(args, capture_output=True, timeout=1800, env=clean_env())
+            if r.returncode == 0 and dest.is_file() and dest.stat().st_size > 0:
+                return True
+            log.warning("%s download failed (%s): %s", tool, r.returncode, r.stderr[-200:])
+        except (OSError, subprocess.SubprocessError) as exc:
+            log.warning("%s could not run: %s", tool, exc)
+        dest.unlink(missing_ok=True)
+    return False
+
+
+def _apt_install_ffmpeg(progress: Progress, cancel: threading.Event) -> Optional[Path]:
+    """Linux last resort: install the distribution's ffmpeg with apt (the system asks for the password)."""
+    if not (sys.platform.startswith("linux") and shutil.which("pkexec") and shutil.which("apt-get")):
+        return None
+    progress(None, "Download failed - installing FFmpeg with apt (your administrator password is needed)...", None)
+    try:
+        r = subprocess.run(["pkexec", "apt-get", "install", "-y", "ffmpeg"], capture_output=True, timeout=1800,
+                           env=dict(os.environ, DEBIAN_FRONTEND="noninteractive"), stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    exe = shutil.which("ffmpeg")
+    if r.returncode == 0 and exe:
+        progress(100.0, "FFmpeg installed", None)
+        return Path(exe).parent
+    return None
 
 
 def _expected_sha256(sha_url: Optional[str], filename: str, cancel: threading.Event) -> Optional[str]:
@@ -314,8 +354,15 @@ def install_ffmpeg(progress: Progress, cancel: threading.Event,
         finally:
             zpath.unlink(missing_ok=True)
     shutil.rmtree(tmp_dir, ignore_errors=True)
+    apt = _apt_install_ffmpeg(progress, cancel) if not (cancel.is_set() or allow_http) else None
+    if apt:
+        return apt
     if last_error and len(reasons) > 1:
-        hint = (" Or install it yourself: sudo apt install ffmpeg" if sys.platform.startswith("linux") else "")
+        hint = ""
+        if sys.platform.startswith("linux"):
+            hint = (" Or install it yourself: sudo apt install ffmpeg"
+                    f"  -  or download {sources[-1][0]} , unpack it and copy the files 'ffmpeg' and 'ffprobe' into "
+                    f"{managed_ffmpeg_dir()}")
         raise FriendlyError(last_error.message + hint, " | ".join(reasons)[:600])
     raise last_error or FriendlyError("FFmpeg could not be downloaded.")
 
