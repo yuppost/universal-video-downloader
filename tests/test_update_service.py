@@ -151,3 +151,46 @@ def test_release_asset_is_the_windows_zip():
               {"name": "UniversalVideoStudio-windows.zip", "browser_download_url": "https://h/w.zip"}]
     assert u._pick_asset(assets)["browser_download_url"].endswith("w.zip")
     assert u._pick_asset([]) == {}
+
+
+# ---- GitHub API rate limit (403) must not look like "no internet" -----------------------------
+class _FakeResp:
+    def __init__(self, url): self._u = url
+    def geturl(self): return self._u
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+
+
+def test_update_check_falls_back_to_the_release_redirect_when_the_api_is_limited(monkeypatch):
+    from app.utils import net
+    import urllib.error
+
+    def fake_open(req, timeout=30):
+        if "api.github.com" in req.full_url:
+            raise urllib.error.HTTPError(req.full_url, 403, "rate limit exceeded", {}, None)
+        assert req.full_url == "https://github.com/o/r/releases/latest"
+        return _FakeResp("https://github.com/o/r/releases/tag/v2.1.0")
+    monkeypatch.setattr(u, "_net_urlopen", fake_open)
+    monkeypatch.setattr(net, "urlopen", fake_open)
+    status, info = u.check_update("github:o/r", "2.0.0")
+    assert status == "available" and info.version == "2.1.0"
+    assert info.asset_url == "https://github.com/o/r/releases/download/v2.1.0/UniversalVideoStudio-windows.zip"
+    assert u.check_update("github:o/r", "2.1.0")[0] == "latest"
+
+
+def test_update_check_reports_error_when_both_ways_fail(monkeypatch):
+    from app.utils import net
+
+    def boom(req, timeout=30):
+        raise OSError("offline")
+    monkeypatch.setattr(u, "_net_urlopen", boom)
+    monkeypatch.setattr(net, "urlopen", boom)
+    assert u.check_update("github:o/r", "2.0.0")[0] == "error"
+
+
+def test_deno_latest_version_uses_the_redirect_before_the_api(monkeypatch):
+    from app.utils import net
+    from app.services import dependency_service as deps
+    monkeypatch.setattr(net, "urlopen", lambda req, timeout=30: _FakeResp("https://github.com/denoland/deno/releases/tag/v2.9.9"))
+    monkeypatch.setattr(deps, "_fetch_text", lambda *a, **k: (_ for _ in ()).throw(AssertionError("API must not be used")))
+    assert deps.latest_deno_version() == "2.9.9"

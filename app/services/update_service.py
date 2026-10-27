@@ -92,6 +92,26 @@ def parse_info(raw: bytes) -> Optional[UpdateInfo]:
     return UpdateInfo(ver, url, str(data.get("notes", ""))[:2000], asset_url, sha.lower(), size)
 
 
+ASSET_NAME = "UniversalVideoStudio-windows.zip"          # the file name the build workflow publishes
+
+
+def _github_fallback(source: str) -> Optional[UpdateInfo]:
+    """Latest release of ``github:<owner>/<repo>`` without the rate-limited REST API (no checksum is available then)."""
+    s = (source or "").strip()
+    if not s.lower().startswith("github:"):
+        return None
+    repo = s[7:].strip().strip("/")
+    try:
+        from app.utils.net import github_latest_tag
+        tag, page = github_latest_tag(repo)
+    except Exception:  # noqa: BLE001
+        return None
+    ver = (tag or "").lstrip("vV")
+    if not tag or not re.fullmatch(r"\d+(\.\d+){0,3}", ver) or urlsplit(page).scheme.lower() != "https":
+        return None
+    return UpdateInfo(ver, page, "", f"https://github.com/{repo}/releases/download/{tag}/{ASSET_NAME}", "", 0)
+
+
 def check_update(source: str, current: str, timeout: int = 8) -> Tuple[str, Optional[UpdateInfo]]:
     """("latest" | "available" | "error" | "unconfigured", info). Never raises."""
     url = resolve_source(source)
@@ -104,7 +124,10 @@ def check_update(source: str, current: str, timeout: int = 8) -> Tuple[str, Opti
         with _net_urlopen(req, timeout=timeout) as r:  # noqa: S310 - https only, checked above
             raw = r.read(300_000)
     except Exception:  # noqa: BLE001 - an update check must never disturb the app
-        return "error", None
+        info = _github_fallback(source)               # API limit (403) / blocked API: ask github.com directly
+        if info is None:
+            return "error", None
+        return ("available", info) if is_newer(info.version, current) else ("latest", info)
     info = parse_info(raw)
     if info is None:
         return "error", None

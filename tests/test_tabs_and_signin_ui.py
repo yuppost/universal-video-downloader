@@ -598,3 +598,17 @@ def test_updates_box_never_stays_on_checking(qapp, monkeypatch):
     assert "Could not check" in box.badges["deno"].text()                  # an exception is not a hang either
     assert "Could not check" in box.badges["ytdlp"].text()                 # the hanging one was ended by the timer
     assert not any("Checking" in b.text() for b in box.badges.values())
+
+
+def test_update_available_dialog_renders_markdown_notes(qapp):
+    from app.services.update_service import UpdateInfo
+    from app.widgets.update_dialog import UpdateAvailableDialog
+    notes = "## What's New\n\n- **Encrypted Cookie Storage:** safer\n- Fixes\n\n**Full Changelog**: https://github.com/o/r/compare/v1...v2"
+    d = UpdateAvailableDialog(UpdateInfo("2.0.1", "https://github.com/o/r/releases/tag/v2.0.1", notes, "https://x/w.zip"), "2.0.0", True)
+    plain = d.notes.toPlainText()
+    assert "**" not in plain and "##" not in plain and "Encrypted Cookie Storage" in plain
+    assert d.btn_main.text() == "Update now"
+    d.btn_main.click()
+    assert d.action == "update"
+    d2 = UpdateAvailableDialog(UpdateInfo("2.0.1", "https://github.com/o/r/releases/tag/v2.0.1"), "2.0.0", False)
+    assert not hasattr(d2, "notes") and d2.btn_main.text() == "Open download page"

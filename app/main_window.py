@@ -112,26 +112,12 @@ class MainWindow(QMainWindow):
         info = self._update_info
         if not info:
             return
-        from urllib.parse import urlsplit
-        from PySide6.QtCore import QUrl
-        from PySide6.QtGui import QDesktopServices
         from app.services import self_update
+        from app.widgets.update_dialog import UpdateAvailableDialog
         one_click = bool(info.asset_url) and self_update.can_self_update()
-        box = QMessageBox(QMessageBox.Information, "New version available",
-                          f"Version {info.version} is available (you have {__version__}).\n\n"
-                          + (info.notes + "\n\n" if info.notes else "")
-                          + ("Update now downloads it, replaces the app files and restarts the app.\n"
-                             "Your settings, sign-ins and history are kept." if one_click else
-                             f"Download page: {urlsplit(info.url).hostname}\n"
-                             "Close the app, then replace your old folder with the new one."), QMessageBox.NoButton, self)
-        b_now = box.addButton("Update now", QMessageBox.AcceptRole) if one_click else None
-        b_page = box.addButton("Open download page", QMessageBox.ActionRole)
-        box.addButton("Later", QMessageBox.RejectRole)
-        box.exec()
-        clicked = box.clickedButton()
-        if clicked is b_page:
-            QDesktopServices.openUrl(QUrl(info.url))
-        elif b_now is not None and clicked is b_now:
+        dlg = UpdateAvailableDialog(info, __version__, one_click, self)
+        dlg.exec()
+        if dlg.action == "update":
             self._start_self_update(info)
 
     def _start_self_update(self, info) -> None:

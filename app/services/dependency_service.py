@@ -378,6 +378,14 @@ def latest_ffmpeg_version(url: str = FFMPEG_VERSION_URL, allow_http: bool = Fals
 
 def latest_deno_version(url: str = DENO_LATEST_URL, allow_http: bool = False) -> Optional[str]:
     import json
+    if url == DENO_LATEST_URL:                            # the REST API is limited to 60 requests/hour per IP: avoid it
+        try:
+            from app.utils.net import github_latest_tag
+            tag, _page = github_latest_tag("denoland/deno")
+            if tag and re.fullmatch(r"v?\d+(\.\d+)+", tag):
+                return tag.lstrip("v")
+        except Exception:  # noqa: BLE001 - fall back to the API below
+            pass
     text = _fetch_text(url, allow_http=allow_http)
     try:
         return str(json.loads(text)["tag_name"]).lstrip("v") if text else None
