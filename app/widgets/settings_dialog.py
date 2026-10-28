@@ -113,6 +113,21 @@ class SettingsDialog(QDialog):
         form.addRow("Sign-in", btn_cookies)
         form.addRow("Fallback browser", self.browser)
         form.addRow("", self.check_app)
+        self.btn_ext_folder = QPushButton("Extension folder")
+        self.btn_ext_folder.setToolTip("Open the folder with the browser extension (Chrome / Edge / Brave: Extensions > "
+                                       "Developer mode > Load unpacked)")
+        self.btn_ext_folder.clicked.connect(self._open_extension_folder)
+        self.btn_ext_connect = QPushButton("Reconnect browsers")
+        self.btn_ext_connect.setToolTip("Register the app with Chrome, Edge and Brave again (done automatically at every start)")
+        self.btn_ext_connect.clicked.connect(self._reconnect_browsers)
+        self.ext_status = QLabel("")
+        self.ext_status.setObjectName("muted")
+        self.ext_status.setWordWrap(True)
+        erow = QHBoxLayout()
+        erow.addWidget(self.btn_ext_folder)
+        erow.addWidget(self.btn_ext_connect)
+        erow.addWidget(self.ext_status, 1)
+        form.addRow("Browser extension", erow)
         self.about = QLabel(f"<b>{APP_NAME}</b> version <b>{__version__}</b> &nbsp;·&nbsp; yt-dlp {yd.ytdlp_version()}")
         self.about.setTextFormat(Qt.RichText)
         form.addRow("About", self.about)
@@ -151,6 +166,22 @@ class SettingsDialog(QDialog):
             self.resize(min(self.width(), scr.width() - 40), min(self.height(), scr.height() - 80))
         self._load()
         wheel_guard.install(self)
+
+    def _open_extension_folder(self) -> None:
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        from app.services import browser_integration as bi
+        folder = bi.extension_folder()
+        if folder is None:
+            self.ext_status.setText("The extension folder was not found next to the app.")
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+
+    def _reconnect_browsers(self) -> None:
+        from app.services import browser_integration as bi
+        ok = bi.register()
+        self.ext_status.setText("Connected to Chrome / Edge / Brave." if ok else
+                                "Not available here (needs the installed Windows app).")
 
     def _open_setup(self) -> None:
         from app.widgets.dependency_dialog import DependencyDialog

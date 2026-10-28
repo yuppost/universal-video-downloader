@@ -1,0 +1,84 @@
+{
+  "manifest_version": 3,
+  "name": "Universal Video Studio",
+  "version": "1.0.0",
+  "description": "Adds a Download button to videos and sends the link to the Universal Video Studio app on your PC.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApXuP10EGteGdxf157EZKRlub6a4dIxSMJ+Grieu0lnrVfuMvrkP2a5uEniqR5FsZgZK/xWzfAuYqzfiv/Dx+w+zF04zgEKlCDE28vOxXJag60bQWH9ryZ5HmxUBAsdTxnggFGbNbTDJiz4unow1oNSN2Vy35+ry0Ucw3M4UCA4+CvFc3py5d+coQ/LwCoDFuyMb7PKZYxBza5zYan6jpj691br73po8oKffENFizThF+JchQRvLxuUC4NqNfJNJ+G/N9fxjsKd/WwDYiSQym7z9XJZ0VeuCiowIXz2O2oQVDLCj37IBnYEmB0P7HkWcxaWIR5lGibDEB+fk0QP1emwIDAQAB",
+  "minimum_chrome_version": "110",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "nativeMessaging",
+    "storage",
+    "contextMenus",
+    "scripting"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.bilibili.com/*",
+        "*://*.dailymotion.com/*",
+        "*://*.facebook.com/*",
+        "*://*.instagram.com/*",
+        "*://*.ok.ru/*",
+        "*://*.reddit.com/*",
+        "*://*.rumble.com/*",
+        "*://*.streamable.com/*",
+        "*://*.tiktok.com/*",
+        "*://*.twitch.tv/*",
+        "*://*.twitter.com/*",
+        "*://*.vimeo.com/*",
+        "*://*.vk.com/*",
+        "*://*.x.com/*",
+        "*://*.youtube.com/*",
+        "*://bilibili.com/*",
+        "*://dailymotion.com/*",
+        "*://facebook.com/*",
+        "*://fb.watch/*",
+        "*://instagram.com/*",
+        "*://ok.ru/*",
+        "*://reddit.com/*",
+        "*://rumble.com/*",
+        "*://streamable.com/*",
+        "*://tiktok.com/*",
+        "*://twitch.tv/*",
+        "*://twitter.com/*",
+        "*://vimeo.com/*",
+        "*://vk.com/*",
+        "*://x.com/*",
+        "*://youtu.be/*",
+        "*://youtube.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "all_frames": true,
+      "match_about_blank": false,
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Download with Universal Video Studio",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  }
+}

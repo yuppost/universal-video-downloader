@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Universal Video Studio - settings</title>
+<style>
+  :root{color-scheme:dark light}
+  body{margin:0;font:14px/1.5 system-ui,Segoe UI,Arial,sans-serif;background:#0f1421;color:#e8ecf6}
+  .wrap{max-width:560px;margin:40px auto;padding:0 20px}
+  label{display:flex;gap:10px;align-items:flex-start;margin:16px 0;cursor:pointer}
+  small{display:block;color:#8b95ad}
+  #msg{margin-top:14px;color:#3ddc84;min-height:1.4em}
+</style>
+<div class="wrap">
+  <h1>Universal Video Studio</h1>
+  <label><input type="checkbox" id="hover"><span>Show the button only while the mouse is over a video<small>Off: the button stays visible on the video.</small></span></label>
+  <label><input type="checkbox" id="all"><span>Show the button on every website<small>By default it appears on popular video sites. The right-click menu works everywhere. This option asks the browser for permission to read all sites.</small></span></label>
+  <div id="msg"></div>
+</div>
+<script src="options.js"></script>

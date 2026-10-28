@@ -35,5 +35,12 @@ Source: "..\dist\UniversalVideoStudio\*"; DestDir: "{app}"; Flags: recursesubdir
 Name: "{autoprograms}\Universal Video Studio"; Filename: "{app}\UniversalVideoStudio.exe"
 Name: "{autodesktop}\Universal Video Studio"; Filename: "{app}\UniversalVideoStudio.exe"; Tasks: desktopicon
 
+; Browser extension (Chrome / Edge / Brave): the native host (uvs-native-host.exe) and the extension folder are part of
+; the app folder; the host is registered per user and the app refreshes this on every start.
+[Registry]
+Root: HKCU; Subkey: "Software\Google\Chrome\NativeMessagingHosts\com.universalvideostudio.host"; ValueType: string; ValueData: "{userappdata}\UniversalVideoStudio\native\com.universalvideostudio.host.json"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Microsoft\Edge\NativeMessagingHosts\com.universalvideostudio.host"; ValueType: string; ValueData: "{userappdata}\UniversalVideoStudio\native\com.universalvideostudio.host.json"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\com.universalvideostudio.host"; ValueType: string; ValueData: "{userappdata}\UniversalVideoStudio\native\com.universalvideostudio.host.json"; Flags: uninsdeletekey
+
 [Run]
 Filename: "{app}\UniversalVideoStudio.exe"; Description: "Start Universal Video Studio"; Flags: nowait postinstall skipifsilent

@@ -56,6 +56,16 @@ def main() -> int:
         except Exception:                    # noqa: BLE001 - a splash problem must never stop the app
             pyi_splash = None
     app = QApplication(sys.argv)
+    from app.services import link_protocol as lp
+    from app.services.link_server import LinkServer, forward_to_running_app
+    start_url = ""                                 # a link given by the browser extension / "uvs-native-host"
+    if "--open-url" in sys.argv:
+        i = sys.argv.index("--open-url")
+        start_url = lp.clean_url(sys.argv[i + 1] if i + 1 < len(sys.argv) else "") or ""
+    if forward_to_running_app(start_url) if start_url else False:
+        if pyi_splash is not None:
+            pyi_splash.close()
+        return 0                                   # the running app took the link: no second window
     from app import APP_NAME, appicon
     app.setApplicationName(APP_NAME)
     app.setOrganizationName("UniversalVideoStudio")
@@ -107,7 +117,14 @@ def main() -> int:
             from app.config import save_settings
             save_settings(settings)
     win = MainWindow(settings)
+    link_server = LinkServer(win)
+    if link_server.start():
+        link_server.urlReceived.connect(win.open_external_url)
     win.show()
+    if start_url:
+        win.open_external_url(start_url)
+    from app.services import browser_integration
+    browser_integration.register()                 # keeps Chrome / Edge / Brave pointed at the native host
     splash.finish(win)
     if pyi_splash is not None:
         try:

@@ -38,6 +38,12 @@ if exist "assets\splash.png" %VPY% -c "import tkinter" >nul 2>nul && set "SPLASH
   --hidden-import PySide6.QtWebEngineWidgets --hidden-import PySide6.QtWebEngineCore ^
   main.py || (echo PyInstaller failed & %PAUSE% & exit /b 1)
 
+REM Native messaging host for the browser extension (tiny console exe, standard library only) + the extension itself.
+%VPY% -m PyInstaller --noconfirm --clean --onefile --console --name uvs-native-host --distpath dist\_host --workpath build\_host native_host.py || (echo Native host build failed & %PAUSE% & exit /b 1)
+copy /Y "dist\_host\uvs-native-host.exe" "dist\UniversalVideoStudio\uvs-native-host.exe" >nul || (echo Could not copy the native host & %PAUSE% & exit /b 1)
+xcopy /E /I /Y /Q "browser_extension" "dist\UniversalVideoStudio\browser_extension" >nul || (echo Could not copy the browser extension & %PAUSE% & exit /b 1)
+rmdir /S /Q "dist\_host" 2>nul
+
 REM FFmpeg and Deno are NOT bundled: the app downloads them (SHA-256 verified) on first launch into %%APPDATA%%.
 echo yt-dlp is bundled; FFmpeg and Deno are downloaded by the app on first launch.
 

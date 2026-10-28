@@ -306,6 +306,21 @@ class MainWindow(QMainWindow):
                 ws.analyze("auto")
         return ws
 
+    def open_external_url(self, url: str) -> None:
+        """A link sent by the browser extension: show the window and analyze it in a new tab."""
+        from app.services.link_protocol import clean_url
+        url = clean_url(url) or ""
+        if not url:
+            return
+        from app.utils.foreground import bring_to_front
+        bring_to_front(self)
+        ws = self.current()
+        if ws is not None and not ws.url_edit.text().strip() and not ws.video:   # an empty tab: use it
+            ws.url_edit.setText(url)
+            ws.analyze("auto")
+        else:
+            self.new_tab(url, analyze=True)
+
     def _retag(self) -> None:
         many = len(self.workspaces()) > 1
         for ws in self.workspaces():
