@@ -83,15 +83,31 @@ def test_host_main_speaks_the_native_protocol(monkeypatch):
 
 
 # ---- the app receives links (real local pipe/socket) -----------------------------------------
+def _pump_while(fn, *args):
+    """Run a blocking client call in a thread while this thread serves the Qt event loop (server and client share a
+    process in tests; in real life they are two processes). Needed on Windows named pipes."""
+    from PySide6.QtCore import QCoreApplication
+    box = []
+    t = threading.Thread(target=lambda: box.append(fn(*args)), daemon=True)
+    t.start()
+    deadline = time.time() + 6
+    while t.is_alive() and time.time() < deadline:
+        QCoreApplication.processEvents()
+        time.sleep(0.01)
+    t.join(1)
+    return box[0] if box else None
+
+
 def test_link_server_receives_and_rejects(qapp):
     from PySide6.QtCore import QCoreApplication
     from app.services.link_server import LinkServer, forward_to_running_app, instance_running
     name = f"uvs-test-{os.getpid()}-{int(time.time())}"
     srv = LinkServer(name=name)
-    assert srv.start() and instance_running(name)
+    assert srv.start()
     got = []
     srv.urlReceived.connect(got.append)
-    assert forward_to_running_app("https://v.com/ok", name)
+    assert _pump_while(instance_running, name)
+    assert _pump_while(forward_to_running_app, "https://v.com/ok", name)
     deadline = time.time() + 3
     while not got and time.time() < deadline:
         QCoreApplication.processEvents()
@@ -110,7 +126,7 @@ def test_link_server_receives_and_rejects(qapp):
             time.sleep(0.02)
     assert got == ["https://v.com/ok"]
     srv.stop()
-    assert not instance_running(name)
+    assert not _pump_while(instance_running, name)
 
 
 def test_second_launch_without_server_returns_false(qapp):
